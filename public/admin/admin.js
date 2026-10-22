@@ -107,14 +107,38 @@
     catch (e) { accessKey = null; if (e.auth) return false; throw e; }
   }
 
+  // A correct password is still rejected (401) when sent to another region's storage host,
+  // so on failure try every region and remember the one that accepts it.
+  async function findRegion(candidates) {
+    const original = conn.host;
+    for (const [host, label] of HOSTS) {
+      if (host === original) continue;
+      conn.host = host;
+      for (const k of candidates) {
+        try { if (await verify(k)) return { key: k, host, label }; } catch { /* lỗi mạng: thử vùng khác */ }
+      }
+    }
+    conn.host = original;
+    return null;
+  }
+
   async function login(pw) {
     if (!conn.zone) throw new Error("Chưa điền tên Storage Zone (mục Kết nối Bunny)");
     const sealed = await fetchSealed();
     const key = sealed ? await unseal(sealed, pw) : null;
-    if (key && await verify(key)) return key;
-    if (await verify(pw)) return pw; // mật khẩu Storage gốc luôn dùng được
-    throw new Error(sealed && key ? "Mật khẩu Storage đã đổi — hãy đăng nhập bằng mật khẩu Storage mới rồi đặt lại mật khẩu quản trị" : "Sai mật khẩu");
+    const candidates = key ? [key, pw] : [pw]; // mật khẩu Storage gốc luôn dùng được
+    for (const k of candidates) if (await verify(k)) return k;
+
+    const found = await findRegion(candidates);
+    if (found) {
+      store.set("admin-conn", { zone: conn.zone, host: conn.host, cdn: conn.cdn });
+      regionNotice = `Storage Zone của bạn ở vùng ${found.label}. Hãy sửa storageHost trong config.js thành "${found.host}" rồi deploy lại (máy này đã tự nhớ).`;
+      return found.key;
+    }
+    if (sealed && key) throw new Error("Mật khẩu Storage đã đổi — hãy đăng nhập bằng mật khẩu Storage mới rồi đặt lại mật khẩu quản trị");
+    throw new Error(`Sai mật khẩu cho Storage Zone "${conn.zone}". Kiểm tra: dùng ô Password trong Storage → FTP & API Access (không phải Read-only password hay API Key của tài khoản), và tên Storage Zone đúng.`);
   }
+  let regionNotice = "";
 
   function showLogin(msg) {
     $("shell").hidden = true;
@@ -138,7 +162,8 @@
     btn.disabled = true; btn.textContent = "Đang kiểm tra…";
     $("loginError").textContent = "";
     try {
-      const key = await login($("pw").value);
+      $("loginBtn").textContent = "Đang kiểm tra… (có thể mất vài giây)";
+      const key = await login($("pw").value.trim());
       store.set("admin-key", key, $("remember").checked ? localStorage : sessionStorage);
       $("pw").value = "";
       await enter();
@@ -581,6 +606,7 @@
     $("view").innerHTML = `<div class="loading">Đang tải danh sách…</div>`;
     try { await reload(); } catch (err) { toast(err.message); }
     render();
+    if (regionNotice) { alert(regionNotice); regionNotice = ""; }
   }
 
   (async () => {
