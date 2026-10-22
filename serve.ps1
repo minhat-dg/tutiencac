@@ -45,7 +45,8 @@ function MockBunny($ctx, $rel) {
     return SendBytes $res $utf8.GetBytes((ConvertTo-Json -InputObject $items -Compress)) "application/json" $m
   }
   if ($m -eq "GET" -or $m -eq "HEAD") {
-    if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { $res.StatusCode = 404; return }
+    # Bunny Storage API (with AccessKey) answers 401 for a missing file; the CDN answers 404.
+    if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { $res.StatusCode = $(if ($authed) { 401 } else { 404 }); return }
     $res.AddHeader("Last-Modified", (Get-Item -LiteralPath $target).LastWriteTimeUtc.ToString("r"))
     $res.AddHeader("Access-Control-Expose-Headers", "Last-Modified, Content-Length")
     return SendBytes $res ([IO.File]::ReadAllBytes($target)) (TypeOf $target) $m
@@ -59,7 +60,7 @@ function MockBunny($ctx, $rel) {
     return SendBytes $res $utf8.GetBytes('{"HttpCode":201,"Message":"File uploaded."}') "application/json" $m
   }
   if ($m -eq "DELETE") {
-    if (-not (Test-Path -LiteralPath $target)) { $res.StatusCode = 404; return }
+    if (-not (Test-Path -LiteralPath $target)) { $res.StatusCode = 401; return }
     Remove-Item -LiteralPath $target -Recurse -Force
     return SendBytes $res $utf8.GetBytes('{"HttpCode":200,"Message":"File deleted successfuly."}') "application/json" $m
   }

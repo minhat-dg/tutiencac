@@ -88,12 +88,22 @@
       if (x.status < 200 || x.status >= 300) throw new Error(`Bunny báo lỗi ${x.status} khi ${method} ${path || "/"}`);
       return x;
     },
+    // Bunny Storage answers 401 (not 404) for a file that does not exist. If the key still
+    // lists the zone root, the 401 only means "missing".
+    async orMissing(promise) {
+      try { return await promise; }
+      catch (e) {
+        if (!e.auth) throw e;
+        try { await this.req("GET", ""); } catch { throw e; }
+        return null;
+      }
+    },
     async getJSON(path) {
-      const x = await this.req("GET", path, { allow404: true });
+      const x = await this.orMissing(this.req("GET", path, { allow404: true }));
       return x ? JSON.parse(x.responseText) : null;
     },
     put(path, body, onProgress) { return this.req("PUT", path, { body, onProgress }); },
-    del(path) { return this.req("DELETE", path, { allow404: true }); },
+    del(path) { return this.orMissing(this.req("DELETE", path, { allow404: true })); },
   };
 
   // ---------- mã hoá mật khẩu Storage bằng mật khẩu quản trị ----------
