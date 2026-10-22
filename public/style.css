@@ -22,6 +22,10 @@
   }
 }
 
+/* filled buttons / selected pills: deep enough for white text in both themes */
+:root { --accent-fill: var(--accent); }
+@media (prefers-color-scheme: dark) { :root { --accent-fill: #b8432f; } }
+
 /* panels outside the reader (music) fall back to the site palette */
 :root { --r-bg: var(--surface); --r-text: var(--text); --r-muted: var(--muted); --r-border: var(--border); }
 
@@ -49,8 +53,8 @@ button { font: inherit; cursor: pointer; }
 .topbar nav a.active { color: var(--accent); }
 
 .btn {
-  border: 1px solid var(--accent);
-  background: var(--accent); color: #fff;
+  border: 1px solid var(--accent-fill);
+  background: var(--accent-fill); color: #fff;
   padding: 8px 16px; border-radius: 8px; font-weight: 500;
 }
 .btn.ghost { background: transparent; color: var(--accent); }
@@ -70,7 +74,7 @@ button { font: inherit; cursor: pointer; }
   border: 1px solid var(--border); background: var(--surface); color: var(--muted);
   padding: 4px 12px; border-radius: 999px; font-size: .85rem;
 }
-.tag.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tag.active { background: var(--accent-fill); color: #fff; border-color: var(--accent-fill); }
 
 .section-title { font-size: 1.1rem; margin: 26px 0 12px; display: flex; align-items: center; gap: 8px; }
 .section-title::before { content: ""; width: 4px; height: 1.1em; background: var(--accent); border-radius: 2px; }
