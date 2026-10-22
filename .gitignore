@@ -13,3 +13,6 @@ desktop.ini
 .DS_Store
 .vscode/
 *.log
+
+# File thử nghiệm trên máy
+public/_test/

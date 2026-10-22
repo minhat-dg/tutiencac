@@ -312,10 +312,14 @@
     input.onchange = () => { if (input.files[0]) addEpub(input.files[0]); input.value = ""; };
     drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
     drop.ondragleave = () => drop.classList.remove("over");
-    drop.ondrop = (e) => {
+    drop.ondrop = async (e) => {
       e.preventDefault(); drop.classList.remove("over");
-      const f = [...e.dataTransfer.files].find((x) => /\.epub$/i.test(x.name));
-      f ? addEpub(f) : toast("Chỉ nhận file .epub");
+      const files = [...e.dataTransfer.files];
+      if (!files.length) {
+        return toast("Không nhận được file. Hãy kéo file từ thư mục trên máy (không kéo từ trong file nén hay thanh tải xuống của trình duyệt), hoặc bấm vào ô để chọn file.");
+      }
+      for (const f of files) if (await isEpub(f)) return addEpub(f);
+      toast(`"${files[0].name}" không phải file EPUB.`);
     };
     const s = $("search");
     if (s) s.oninput = () => { query = s.value; const pos = s.selectionStart; viewNovels(); const t = $("search"); t.focus(); t.setSelectionRange(pos, pos); };
@@ -357,6 +361,16 @@
     c.height = Math.round(bmp.height * scale);
     c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
     return new Promise((res) => c.toBlob(res, "image/jpeg", 0.85));
+  }
+
+  // EPUB = zip whose first entry is "mimetype" containing "application/epub+zip", so the
+  // content identifies it even when the file name lost its extension.
+  async function isEpub(file) {
+    if (/\.epub\s*$/i.test(file.name) || file.type === "application/epub+zip") return true;
+    try {
+      const head = new TextDecoder().decode(await file.slice(0, 80).arrayBuffer());
+      return head.startsWith("PK") && head.includes("application/epub+zip");
+    } catch { return false; }
   }
 
   async function readEpub(file) {
@@ -632,6 +646,10 @@
       out.innerHTML = `<b>Không đọc được qua CDN.</b> Bật “Add CORS headers” cho đuôi json, epub, jpg, mp3… trong Pull Zone.`;
     }
   }
+
+  // Thả file trượt ra ngoài ô thì trình duyệt sẽ mở file đó: chặn lại.
+  addEventListener("dragover", (e) => e.preventDefault());
+  addEventListener("drop", (e) => e.preventDefault());
 
   // ---------- khởi động ----------
   async function enter() {
