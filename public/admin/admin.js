@@ -31,10 +31,33 @@
     ["br.storage.bunnycdn.com", "São Paulo"], ["jh.storage.bunnycdn.com", "Johannesburg"],
     ["syd.storage.bunnycdn.com", "Sydney"],
   ];
-  const conn = Object.assign(
+  // Accept whatever gets pasted, e.g. "https://storage.bunnycdn.com/tutiencac" in either field.
+  function cleanConn(c) {
+    let zone = String(c.zone || "").trim(), host = String(c.host || "").trim();
+    const cdn = String(c.cdn || "").trim().replace(/\/+$/, "");
+    const fromUrl = (s) => { try { return new URL(/^https?:\/\//.test(s) ? s : "https://" + s); } catch { return null; } };
+    if (/bunnycdn\.com/i.test(host)) {
+      const u = fromUrl(host);
+      if (u) {
+        host = u.hostname;
+        const z = u.pathname.split("/").filter(Boolean)[0];
+        if (z && !zone) zone = z;
+      }
+    }
+    if (/[/.:]/.test(zone)) {
+      const u = fromUrl(zone);
+      if (u && /bunnycdn\.com$/i.test(u.hostname)) {
+        if (/storage\.bunnycdn\.com$/i.test(u.hostname)) host = u.hostname;
+        zone = u.pathname.split("/").filter(Boolean)[0] || zone;
+      }
+      if (u && /\.b-cdn\.net$/i.test(u.hostname)) zone = u.hostname.split(".")[0];
+    }
+    return { zone, host: host || HOSTS[0][0], cdn };
+  }
+  const conn = cleanConn(Object.assign(
     { zone: CFG.storageZone || "", host: CFG.storageHost || HOSTS[0][0], cdn: CFG.cdnBase || "" },
     store.get("admin-conn") || {}
-  );
+  ));
   const cdnUrl = (p) => `${conn.cdn.replace(/\/+$/, "")}/${p.split("/").map(encodeURIComponent).join("/")}`;
 
   let accessKey = null;
@@ -153,7 +176,8 @@
 
   $("loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const zone = $("cZone").value.trim(), host = $("cHost").value.trim() || HOSTS[0][0], cdn = $("cCdn").value.trim().replace(/\/+$/, "");
+    const { zone, host, cdn } = cleanConn({ zone: $("cZone").value, host: $("cHost").value, cdn: $("cCdn").value });
+    $("cZone").value = zone; $("cHost").value = host; $("cCdn").value = cdn;
     if (zone !== conn.zone || host !== conn.host || cdn !== conn.cdn) {
       Object.assign(conn, { zone, host, cdn });
       store.set("admin-conn", { zone, host, cdn });
