@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Quản trị · Tu Tiên Các</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@700&family=Be+Vietnam+Pro:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body class="admin">
+  <!-- Đăng nhập -->
+  <section id="login" class="login" hidden>
+    <form class="login-card" id="loginForm" autocomplete="off">
+      <div class="login-logo">☯</div>
+      <h1>Quản trị Tu Tiên Các</h1>
+      <label for="pw">Mật khẩu</label>
+      <input type="password" id="pw" autocomplete="current-password" required autofocus>
+      <label class="check"><input type="checkbox" id="remember"> Ghi nhớ trên máy này</label>
+      <button class="btn" type="submit" id="loginBtn">Đăng nhập</button>
+      <p class="error" id="loginError" role="alert"></p>
+      <p class="hint">Lần đầu: nhập <b>mật khẩu Storage Zone</b> (Bunny → Storage → FTP &amp; API Access), rồi đặt mật khẩu quản trị riêng trong mục Cài đặt.</p>
+      <details class="conn">
+        <summary>Kết nối Bunny</summary>
+        <label>Tên Storage Zone<input id="cZone" placeholder="tutien"></label>
+        <label>Máy chủ Storage<input id="cHost" list="hostList" placeholder="storage.bunnycdn.com"><datalist id="hostList"></datalist></label>
+        <label>Địa chỉ Pull Zone (CDN)<input id="cCdn" placeholder="https://tutien.b-cdn.net"></label>
+        <p class="hint">Mặc định lấy từ config.js. Thay đổi ở đây chỉ áp dụng trên máy này.</p>
+      </details>
+    </form>
+  </section>
+
+  <!-- Giao diện quản trị -->
+  <div id="shell" hidden>
+    <header class="topbar">
+      <a href="#truyen" class="brand">☯<span class="brand-text"> Quản trị</span></a>
+      <nav class="tabs">
+        <a href="#truyen" data-tab="truyen">Truyện</a>
+        <a href="#nhac" data-tab="nhac">Nhạc nền</a>
+        <a href="#caidat" data-tab="caidat">Cài đặt</a>
+      </nav>
+      <div class="top-right">
+        <a class="ibtn" href="/" target="_blank" rel="noopener" title="Mở trang đọc">↗</a>
+        <button class="ibtn" id="logoutBtn" title="Đăng xuất">⏻</button>
+      </div>
+    </header>
+    <main id="view" class="tool"></main>
+  </div>
+
+  <dialog id="editor"></dialog>
+  <div class="busy" id="busy" hidden><div class="busy-card"><div class="spinner"></div><span id="busyText">Đang xử lý…</span><div class="bar"><div id="busyBar"></div></div></div></div>
+  <div id="toast" class="toast"></div>
+
+  <script src="/config.js"></script>
+  <script src="/js/epub.js"></script>
+  <script src="/admin/admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+# Tu Tiên Các
+
+Web đọc truyện tu tiên, **không có backend**:
+
+- **Vercel**: chỉ chứa web tĩnh (thư mục `public/`). Gồm trang đọc `/` và trang quản trị `/admin`.
+- **Bunny Storage + Pull Zone**: chứa truyện (.epub), ảnh bìa, nhạc và file `catalog.json`.
+- **Người đọc**: tiến độ đọc, tủ sách, cài đặt và nhạc đang chọn lưu trong localStorage. Truyện đã tải lưu trong IndexedDB, mở lại không phải tải lại.
+- **Admin**: trang `/admin` upload thẳng lên Bunny Storage từ trình duyệt.
+
+```
+Người đọc ──▶ Vercel (/)       ──đọc──▶ Bunny CDN (catalog.json, .epub, ảnh, nhạc)
+Admin     ──▶ Vercel (/admin)  ──ghi──▶ Bunny Storage API ──▶ Storage Zone ──▶ Pull Zone
+```
+
+## Trang quản trị `/admin`
+
+- **Truyện**:
+  - Kéo thả file EPUB vào, web tự đọc tên, tác giả, giới thiệu, thể loại, ảnh bìa và danh sách chương.
+  - Sửa thông tin rồi bấm **Đăng truyện**.
+  - Sửa, ẩn/hiện (lưu nháp), sắp xếp thứ tự, thay EPUB, đổi ảnh bìa, xoá truyện (xoá luôn file trên Bunny).
+- **Nhạc nền**: tải mp3/ogg/m4a lên, đổi tên, nghe thử, xoá.
+- **Cài đặt**: tên trang, thông báo ở đầu thư viện, mật khẩu quản trị, kiểm tra kết nối CDN.
+
+### Mật khẩu
+
+1. Lần đầu, đăng nhập bằng **mật khẩu Storage Zone** (Bunny → Storage → *FTP & API Access* → *Password*).
+2. Vào **Cài đặt → Mật khẩu quản trị**, đặt mật khẩu riêng (ít nhất 10 ký tự). Từ đó đăng nhập bằng mật khẩu này.
+
+Cách hoạt động:
+
+- Mật khẩu quản trị dùng để mã hoá mật khẩu Storage (PBKDF2-SHA256 600.000 vòng + AES-GCM). Bản mã được lưu tại `_admin/key.json` trên Bunny.
+- Code và Vercel không chứa bí mật nào.
+- Bản mã ai cũng tải được, nên mật khẩu quản trị cần **dài và khó đoán**.
+- Mật khẩu Storage gốc luôn đăng nhập được. Nếu đổi mật khẩu Storage trên Bunny, hãy đăng nhập bằng mật khẩu mới rồi đặt lại mật khẩu quản trị.
+- "Ghi nhớ trên máy này" lưu mật khẩu Storage trong trình duyệt. Chỉ bật trên máy riêng của bạn.
+
+Mỗi lần thay EPUB hoặc ảnh bìa, file mới được đặt tên kèm mã thời gian, nên CDN không bao giờ trả bản cũ. File cũ tự bị xoá.
+
+## Cấu trúc trên Bunny Storage
+
+```
+/catalog.json            danh sách truyện, nhạc và thông tin trang
+/truyen/*.epub           truyện
+/bia/*.jpg               ảnh bìa (thu nhỏ còn 600px)
+/nhac/*.mp3              nhạc nền tải lên
+/_admin/key.json         mật khẩu quản trị đã mã hoá
+```
+
+`catalog.json` do trang quản trị tự ghi. Bạn vẫn có thể sửa tay: mỗi truyện chỉ bắt buộc có `file`, các trường khác web tự lấy từ EPUB.
+
+## Cài đặt Bunny
+
+1. Tạo **Storage Zone** (ví dụ `tutien`) và ghi nhớ vùng (region) của nó.
+2. Tạo **Pull Zone** với nguồn (origin) là Storage Zone đó, ví dụ `https://tutien.b-cdn.net`.
+3. Pull Zone → **Headers** → bật **Add CORS headers** và thêm các đuôi `json, epub, jpg, png, webp, mp3, ogg, m4a`.
+   Thiếu bước này thì trang đọc không tải được truyện. Mục **Cài đặt** trong /admin có dòng kiểm tra kết nối.
+4. Pull Zone → **Caching**: kiểm tra **Vary Cache → URL Query String** đang bật. Khi đó truyện mới hiện trên trang đọc sau khoảng 1 phút.
+
+## Deploy lên Vercel
+
+1. Sửa `public/config.js`:
+   ```js
+   cdnBase: "https://tutien.b-cdn.net",
+   storageZone: "tutien",
+   storageHost: "sg.storage.bunnycdn.com", // theo vùng Storage Zone, Falkenstein là storage.bunnycdn.com
+   ```
+2. Đưa thư mục dự án lên GitHub, rồi trên Vercel chọn **Add New → Project** và import repo. Không cần build, `vercel.json` đã cấu hình sẵn.
+
+Để trống `cdnBase` thì trang đọc chạy chế độ demo với 3 truyện mẫu trong `public/js/demo-data.js`.
+
+## Chạy thử trên máy
+
+```bash
+powershell -ExecutionPolicy Bypass -File serve.ps1
+```
+
+Mở http://localhost:5500 (trang đọc) và http://localhost:5500/admin (quản trị).
+
+Muốn thử trang quản trị mà chưa có Bunny, chạy thêm `-Mock` để giả lập Bunny Storage trên máy:
+
+```bash
+powershell -ExecutionPolicy Bypass -File serve.ps1 -Mock
+```
+
+Dữ liệu giả lập lưu trong thư mục `mock-bunny\`. Trên màn hình đăng nhập, mở **Kết nối Bunny** và điền:
+
+- Storage Zone: `test`
+- Máy chủ Storage: `http://localhost:5500/_mock`
+- CDN: `http://localhost:5500/_mock/test`
+
+Mật khẩu là `devkey`.
+
+## Nhạc nền
+
+- 4 bài dựng sẵn được tổng hợp trực tiếp bằng Web Audio theo thang ngũ cung, gồm tiếng cổ cầm, tiêu, chuông, mưa, gió và giọt nước. Không cần file và không lo bản quyền:
+  - *Thanh Sơn Tĩnh Tọa*
+  - *Vân Hải Phiêu Diêu*
+  - *Trúc Lâm Thính Vũ*
+  - *Linh Tuyền Cổ Động*
+- Bài tải lên qua /admin hiện thêm trong danh sách. Chỉ dùng nhạc bạn có quyền phát.
+
+## Mã nguồn
+
+| File | Nội dung |
+|---|---|
+| `public/index.html`, `public/js/app.js` | Trang đọc: thư viện, tủ sách, trình đọc, sao lưu/khôi phục dữ liệu |
+| `public/admin/` | Trang quản trị |
+| `public/js/epub.js` | Đọc EPUB trên trình duyệt (dùng JSZip từ cdnjs), dùng chung cho cả hai trang |
+| `public/js/music.js` | Nhạc nền |
+| `public/config.js` | Cấu hình kết nối Bunny (không chứa mật khẩu) |
+| `serve.ps1` | Server tĩnh để chạy thử, kèm chế độ giả lập Bunny |

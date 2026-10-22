@@ -1,0 +1,15 @@
+# Dữ liệu giả lập Bunny khi chạy serve.ps1 -Mock
+mock-bunny/
+
+# Vercel CLI
+.vercel/
+
+# Cấu hình riêng của Claude Code / máy cá nhân
+.claude/
+
+# Hệ điều hành, trình soạn thảo
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+*.log

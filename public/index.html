@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tu Tiên Các</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400&family=Be+Vietnam+Pro:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="#/" class="brand">☯<span class="brand-text"> Tu Tiên Các</span></a>
+    <nav>
+      <a href="#/" data-nav="home">Thư viện</a>
+      <a href="#/shelf" data-nav="shelf">Tủ sách</a>
+      <button class="ibtn music-btn" data-music title="Nhạc nền">♪</button>
+    </nav>
+  </header>
+
+  <main id="app"><div class="loading">Đang tải thư viện…</div></main>
+
+  <div class="backdrop" id="musicBackdrop"></div>
+  <aside class="panel" id="musicPanel" aria-label="Nhạc nền">
+    <h3>Nhạc nền <button class="ibtn" id="musicClose">✕</button></h3>
+    <div class="setrow"><button class="btn" id="musicPlay">▶ Phát</button></div>
+    <div class="setrow"><label for="musicVol">Âm lượng</label><input type="range" id="musicVol" min="0" max="100"></div>
+    <div class="setrow"><label>Chọn bài</label><ul class="mlist" id="musicList"></ul></div>
+    <p class="hint">Các bài dựng sẵn được tạo trực tiếp trên trình duyệt từ ngũ cung cổ phong, mỗi lần nghe một khác.</p>
+  </aside>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="js/demo-data.js"></script>
+  <script src="js/epub.js"></script>
+  <script src="js/music.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
