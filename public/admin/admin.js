@@ -433,7 +433,9 @@
   // Nhận diện theo nội dung để vẫn nhận khi tên file mất đuôi:
   //   EPUB = zip có mục "mimetype" ghi "application/epub+zip"
   //   PRC/MOBI/AZW3 = cơ sở dữ liệu Palm kiểu "BOOKMOBI" (hoặc "TEXtREAd")
-  const BOOK_ACCEPT = ".epub,application/epub+zip,.prc,.mobi,.azw,.azw3,application/x-mobipocket-ebook";
+  // Không giới hạn loại file ở ô chọn: Windows / Android / iPhone không biết đuôi .prc .mobi .azw3
+  // nên làm mờ các file đó nếu có danh sách đuôi. Loại file được kiểm tra theo nội dung ở bookKind().
+  const BOOK_ACCEPT = "";
   async function bookKind(file) {
     try {
       const head = new Uint8Array(await file.slice(0, 80).arrayBuffer());
