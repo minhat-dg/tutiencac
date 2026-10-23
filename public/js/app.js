@@ -25,32 +25,43 @@
   let shelf = new Set(LS.get("shelf", []));
   const saveShelf = () => LS.set("shelf", [...shelf]);
 
-  // ---------- IndexedDB: cache of downloaded & parsed EPUBs ----------
+  // ---------- IndexedDB: whole EPUBs ("books") and chapter packs ("chunks") read on this device ----------
+  function store(name, keyPath) {
+    return {
+      async tx(mode, fn) {
+        const db = await IDB.open();
+        return new Promise((resolve, reject) => {
+          const t = db.transaction(name, mode);
+          const r = fn(t.objectStore(name));
+          t.oncomplete = () => resolve(r && r.result);
+          t.onerror = () => reject(t.error);
+        });
+      },
+      get(k) { return this.tx("readonly", (s) => s.get(k)).catch(() => null); },
+      put(v) { return this.tx("readwrite", (s) => s.put(v)); },
+      clear() { return this.tx("readwrite", (s) => s.clear()); },
+      keys() { return this.tx("readonly", (s) => s.getAllKeys()).catch(() => []); },
+      keyPath,
+    };
+  }
   const IDB = {
     _db: null,
     open() {
       if (this._db) return Promise.resolve(this._db);
       return new Promise((resolve, reject) => {
-        const req = indexedDB.open("tutiencac-books", 1);
-        req.onupgradeneeded = () => req.result.createObjectStore("books", { keyPath: "id" });
+        const req = indexedDB.open("tutiencac-books", 2);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains("books")) db.createObjectStore("books", { keyPath: "id" });
+          if (!db.objectStoreNames.contains("chunks")) db.createObjectStore("chunks", { keyPath: "key" });
+        };
         req.onsuccess = () => resolve((this._db = req.result));
         req.onerror = () => reject(req.error);
       });
     },
-    async tx(mode, fn) {
-      const db = await this.open();
-      return new Promise((resolve, reject) => {
-        const t = db.transaction("books", mode);
-        const r = fn(t.objectStore("books"));
-        t.oncomplete = () => resolve(r && r.result);
-        t.onerror = () => reject(t.error);
-      });
-    },
-    get(id) { return this.tx("readonly", (s) => s.get(id)).catch(() => null); },
-    put(b) { return this.tx("readwrite", (s) => s.put(b)); },
-    clear() { return this.tx("readwrite", (s) => s.clear()); },
-    keys() { return this.tx("readonly", (s) => s.getAllKeys()).catch(() => []); },
   };
+  const Books = store("books");
+  const Chunks = store("chunks");
 
   // ---------- helpers ----------
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -94,7 +105,11 @@
     return {
       id: e.id ? slug(e.id) : slug(file.replace(/^.*\//, "").replace(/\.epub$/i, "")),
       file,
-      title: e.title || prettify(file),
+      // Admin-published novels are split into packs: <dir>/toc.json + <dir>/c<k>.json
+      dir: String(e.dir || "").replace(/\/+$/, ""),
+      chunk: +e.chunk || 50,
+      words: +e.words || 0,
+      title: e.title || prettify(file || e.id || ""),
       author: e.author || "",
       tags: [].concat(e.tags || []),
       status: e.status || "",
@@ -119,7 +134,7 @@
     const cat = await r.json();
     applySite((!Array.isArray(cat) && cat.site) || {});
     const list = Array.isArray(cat) ? cat : cat.novels || [];
-    novels = list.filter((e) => e && e.file && !e.hidden).map(normalize);
+    novels = list.filter((e) => e && (e.file || e.dir) && !e.hidden).map(normalize);
     const seen = new Set();
     novels = novels.filter((n) => !seen.has(n.id) && seen.add(n.id));
     return Array.isArray(cat) ? [] : cat.music || [];
@@ -173,7 +188,7 @@
     if (n.demo) {
       book = { id: n.id, chapters: n.demo.chapters };
     } else {
-      const cached = await IDB.get(n.id);
+      const cached = await Books.get(n.id);
       let fresh = cached && cached.file === n.file && cached.updated === n.updated;
       if (fresh && !n.updated) {
         const s = await remoteStamp(n);
@@ -188,7 +203,7 @@
           chapters: p.chapters, cover: p.cover,
           meta: { title: p.title, author: p.author, description: p.description, tags: p.tags },
         };
-        IDB.put(book).catch(() => toast("Bộ nhớ trình duyệt đầy, truyện sẽ phải tải lại lần sau"));
+        Books.put(book).catch(() => toast("Bộ nhớ trình duyệt đầy, truyện sẽ phải tải lại lần sau"));
       }
     }
     books.set(n.id, book);
@@ -210,12 +225,55 @@
   // On startup, enrich the library from books already cached on this device.
   async function hydrateFromCache() {
     if (DEMO) return;
-    const ids = new Set(await IDB.keys());
-    await Promise.all(novels.filter((n) => ids.has(n.id)).map(async (n) => {
-      const b = await IDB.get(n.id);
+    const ids = new Set(await Books.keys());
+    await Promise.all(novels.filter((n) => !n.dir && ids.has(n.id)).map(async (n) => {
+      const b = await Books.get(n.id);
       if (b && b.file === n.file) fillFromBook(n, b);
     }));
   }
+
+  // ---------- chapter source: packs on the CDN, a whole EPUB, or the demo data ----------
+  const packs = new Map(); // "<dir>/<name>" -> parsed JSON (memory cache)
+
+  // Packs live in versioned folders and never change, so a copy on this device is always valid.
+  async function getPack(dir, name) {
+    const key = `${dir}/${name}`;
+    if (packs.has(key)) return packs.get(key);
+    const job = (async () => {
+      const saved = await Chunks.get(key);
+      if (saved) return saved.data;
+      const r = await fetch(cdnUrl(key));
+      if (!r.ok) throw new Error(`Không tải được dữ liệu truyện (${r.status})`);
+      const data = await r.json();
+      Chunks.put({ key, data, t: Date.now() }).catch(() => {});
+      return data;
+    })();
+    packs.set(key, job);
+    try { return await job; } catch (e) { packs.delete(key); throw e; }
+  }
+
+  // Chapter titles, in order.
+  async function getTitles(n, onProgress) {
+    if (n.demo) return n.demo.chapters.map((c) => c.title);
+    if (n.dir) {
+      const toc = await getPack(n.dir, "toc.json");
+      n.chapters = toc.titles.length;
+      if (toc.chunk) n.chunk = toc.chunk;
+      return toc.titles;
+    }
+    return (await getBook(n, onProgress)).chapters.map((c) => c.title);
+  }
+
+  async function getChapter(n, i) {
+    if (n.demo) return n.demo.chapters[i];
+    if (!n.dir) return (await getBook(n)).chapters[i];
+    const k = Math.floor(i / n.chunk);
+    const pack = await getPack(n.dir, `c${k}.json`);
+    // read ahead: fetch the next pack while the reader is near the end of this one
+    if (i % n.chunk >= n.chunk - 3 && (k + 1) * n.chunk < n.chapters) getPack(n.dir, `c${k + 1}.json`).catch(() => {});
+    return pack[i - k * n.chunk];
+  }
+  const isLoaded = (n) => n.demo || (n.dir ? packs.has(`${n.dir}/toc.json`) : books.has(n.id));
 
   // ---------- views ----------
   function coverHTML(n) {
@@ -318,26 +376,28 @@
     };
     const clear = document.getElementById("clearBtn");
     if (clear) clear.onclick = async () => {
-      await IDB.clear();
+      await Promise.all([Books.clear(), Chunks.clear()]);
       books.clear();
+      packs.clear();
       toast("Đã xoá các truyện tải về (tiến độ đọc vẫn giữ nguyên)");
     };
   }
 
-  function chapterListHTML(n, book) {
+  function chapterListHTML(n, titles) {
     const p = progress[n.id];
     const read = new Set(p ? p.read : []);
-    return `<ul class="chapters">${book.chapters.map((c, i) =>
-      `<li><a href="#/read/${encodeURIComponent(n.id)}/${i}" class="${p && p.ch === i ? "current" : read.has(i) ? "read" : ""}">${esc(c.title)}</a></li>`
+    return `<ul class="chapters">${titles.map((t, i) =>
+      `<li><a href="#/read/${encodeURIComponent(n.id)}/${i}" class="${p && p.ch === i ? "current" : read.has(i) ? "read" : ""}">${esc(t)}</a></li>`
     ).join("")}</ul>`;
   }
 
   async function viewNovel(id, stale) {
     const n = findNovel(id);
     if (!n) return notFound();
-    const render = (book) => {
+    const render = (titles) => {
       const p = progress[n.id];
-      const words = book ? book.chapters.reduce((s, c) => s + c.content.split(/\s+/).length, 0) : 0;
+      const book = books.get(n.id) || (n.demo && n.demo);
+      const words = n.words || (book ? book.chapters.reduce((s, c) => s + c.content.split(/\s+/).length, 0) : 0);
       $app.innerHTML = `
         <div class="detail">
           <div>${coverHTML(n)}</div>
@@ -359,7 +419,7 @@
           </div>
         </div>
         <h2 class="section-title">Danh sách chương</h2>
-        ${book ? chapterListHTML(n, book) : `<div class="loading" id="dl"><div class="bar"><div id="dlBar"></div></div><span id="dlText">Đang tải truyện…</span></div>`}
+        ${titles ? chapterListHTML(n, titles) : `<div class="loading" id="dl"><div class="bar"><div id="dlBar"></div></div><span id="dlText">Đang tải truyện…</span></div>`}
       `;
       document.getElementById("shelfBtn").addEventListener("click", (e) => {
         if (shelf.has(n.id)) { shelf.delete(n.id); e.target.textContent = "＋ Thêm vào tủ"; toast("Đã bỏ khỏi tủ sách"); }
@@ -368,14 +428,13 @@
       });
     };
 
-    if (books.has(n.id)) return render(books.get(n.id));
-    render(null);
-    const book = await getBook(n, (r) => {
+    if (!isLoaded(n)) render(null);
+    const titles = await getTitles(n, (r) => {
       const bar = document.getElementById("dlBar"), txt = document.getElementById("dlText");
       if (bar) bar.style.width = Math.round(r * 100) + "%";
       if (txt) txt.textContent = `Đang tải truyện… ${Math.round(r * 100)}%`;
     });
-    if (!stale()) render(book);
+    if (!stale()) render(titles);
   }
 
   function notFound(msg) {
@@ -390,19 +449,25 @@
   async function viewReader(id, chIdx, stale) {
     const n = findNovel(id);
     if (!n) return notFound();
-    if (!books.has(n.id)) $app.innerHTML = `<div class="loading"><span id="dlText">Đang tải truyện…</span></div>`;
-    const book = await getBook(n, (r) => {
-      const t = document.getElementById("dlText");
-      if (t) t.textContent = `Đang tải truyện… ${Math.round(r * 100)}%`;
-    });
+    const loading = setTimeout(() => {
+      if (!stale()) $app.innerHTML = `<div class="loading"><span id="dlText">Đang tải truyện…</span></div>`;
+    }, 150);
+    let titles, ch;
+    try {
+      titles = await getTitles(n, (r) => {
+        const t = document.getElementById("dlText");
+        if (t) t.textContent = `Đang tải truyện… ${Math.round(r * 100)}%`;
+      });
+      chIdx = Math.max(0, Math.min(titles.length - 1, chIdx | 0));
+      ch = await getChapter(n, chIdx);
+    } finally { clearTimeout(loading); }
     if (stale()) return;
+    if (!ch) return notFound("Không tìm thấy chương này.");
 
-    chIdx = Math.max(0, Math.min(book.chapters.length - 1, chIdx | 0));
-    const ch = book.chapters[chIdx];
     document.body.classList.add("reading");
     const paras = ch.content.split(/\n+/).map((s) => s.trim()).filter(Boolean);
     const base = `#/read/${encodeURIComponent(n.id)}/`;
-    const hasPrev = chIdx > 0, hasNext = chIdx < book.chapters.length - 1;
+    const hasPrev = chIdx > 0, hasNext = chIdx < titles.length - 1;
     document.title = `${ch.title} · ${n.title}`;
 
     $app.innerHTML = `
@@ -428,7 +493,7 @@
         <div class="backdrop" id="backdrop"></div>
         <aside class="panel left" id="tocPanel">
           <h3>Mục lục <button class="ibtn" data-close>✕</button></h3>
-          <ul class="toc">${book.chapters.map((c, i) => `<li><a href="${base}${i}" class="${i === chIdx ? "current" : ""}">${esc(c.title)}</a></li>`).join("")}</ul>
+          <ul class="toc">${titles.map((t, i) => `<li><a href="${base}${i}" class="${i === chIdx ? "current" : ""}">${esc(t)}</a></li>`).join("")}</ul>
         </aside>
         <aside class="panel" id="setPanel">
           <h3>Tuỳ chỉnh <button class="ibtn" data-close>✕</button></h3>

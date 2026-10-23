@@ -218,11 +218,12 @@
   // ---------- catalog ----------
   let cat = { site: {}, novels: [], music: [] };
   const fileId = (file) => slug(String(file).replace(/^.*\//, "").replace(/\.epub$/i, ""));
-  const entryId = (n) => (n.id ? slug(n.id) : fileId(n.file));
+  const entryId = (n) => (n.id ? slug(n.id) : fileId(n.file || ""));
+  const asDir = (d) => String(d).replace(/\/?$/, "/");
 
   function normalizeCat(c) {
     c = Array.isArray(c) ? { novels: c } : c || {};
-    return { site: c.site || {}, novels: (c.novels || []).filter((n) => n && n.file), music: (c.music || []).filter((m) => m && m.file) };
+    return { site: c.site || {}, novels: (c.novels || []).filter((n) => n && (n.file || n.dir)), music: (c.music || []).filter((m) => m && m.file) };
   }
   async function reload() { cat = normalizeCat(await Bunny.getJSON("catalog.json")); }
 
@@ -290,7 +291,7 @@
           <div class="nrow ${n.hidden ? "is-hidden" : ""}" data-i="${i}">
             ${thumbHTML(n)}
             <div class="ninfo">
-              <div class="ntitle">${esc(n.title || n.file)}</div>
+              <div class="ntitle">${esc(n.title || n.file || n.id)}</div>
               <div class="nsub">
                 <span>${esc(n.author || "Khuyết danh")}</span>
                 ${n.chapters ? `<span>${n.chapters} chương</span>` : ""}
@@ -328,14 +329,15 @@
       const b = e.target.closest("[data-act]");
       if (!b) return;
       const n = cat.novels[+b.closest("[data-i]").dataset.i];
-      const key = n.file;
-      const at = (c) => c.novels.findIndex((x) => x.file === key);
+      const key = entryId(n);
+      const at = (c) => c.novels.findIndex((x) => entryId(x) === key);
       if (b.dataset.act === "edit") return openEditor(n);
       if (b.dataset.act === "del") {
-        if (!confirm(`Xoá truyện "${n.title}"?\nFile EPUB và ảnh bìa trên Bunny cũng bị xoá.`)) return;
+        if (!confirm(`Xoá truyện "${n.title}"?\nNội dung truyện và ảnh bìa trên Bunny cũng bị xoá.`)) return;
         await busy("Đang xoá…", async () => {
           await mutate((c) => { const i = at(c); if (i >= 0) c.novels.splice(i, 1); });
-          await Bunny.del(n.file);
+          if (n.dir) await Bunny.del(asDir(n.dir));
+          if (n.file) await Bunny.del(n.file);
           if (n.cover) await Bunny.del(n.cover);
         });
         return toast("Đã xoá truyện");
@@ -426,7 +428,8 @@
               <label class="field">Giới thiệu<textarea name="description" rows="5">${esc(f.description)}</textarea></label>
               <label class="check"><input type="checkbox" name="hidden" ${orig && orig.hidden ? "checked" : ""}> Ẩn khỏi thư viện (lưu nháp)</label>
               <div class="field">
-                <span>${chCount ? `${chCount} chương` : ""}${state.epub ? ` · file mới: ${esc(state.epub.name)} (${(state.epub.size / 1048576).toFixed(1)} MB)` : orig ? ` · ${esc(orig.file)}` : ""}</span>
+                <span>${chCount ? `${chCount} chương` : ""}${state.epub ? ` · file mới: ${esc(state.epub.name)} (${(state.epub.size / 1048576).toFixed(1)} MB)` : ""}</span>
+                ${orig && !orig.dir && !state.chapters ? `<div class="notice">Truyện này còn ở dạng EPUB nguyên khối, người đọc phải tải cả file mới đọc được. <button type="button" class="btn small" id="edConvert">Chuyển sang dạng tải nhanh</button></div>` : ""}
                 ${state.chapters ? `<ol class="chap-preview">${state.chapters.slice(0, 50).map((c) => `<li>${esc(c.title)}</li>`).join("")}${state.chapters.length > 50 ? "<li>…</li>" : ""}</ol>` : ""}
               </div>
             </div>
@@ -449,6 +452,22 @@
         const file = e.target.files[0];
         if (!file) return;
         try { snapshot(); state.cover = await toJpeg(file); draw(); } catch { toast("Không đọc được ảnh"); }
+      };
+      const convert = dlg.querySelector("#edConvert");
+      if (convert) convert.onclick = async () => {
+        snapshot();
+        try {
+          const blob = await busy("Đang tải EPUB cũ từ Bunny…", async () => {
+            const r = await fetch(cdnUrl(orig.file));
+            if (!r.ok) throw new Error(`Không tải được ${orig.file} (${r.status})`);
+            return r.blob();
+          });
+          const r = await readEpub(new File([blob], orig.file.replace(/^.*\//, "")));
+          state.chapters = r.parsed.chapters;
+          if (r.cover && !orig.cover && !state.cover) state.cover = r.cover;
+          draw();
+          toast("Đã đọc xong. Bấm “Lưu thay đổi” để tải lên dạng mới.");
+        } catch {}
       };
       dlg.querySelector("#edEpub").onchange = async (e) => {
         const file = e.target.files[0];
@@ -473,6 +492,41 @@
     dlg.showModal();
   }
 
+  // Chia truyện thành các gói 50 chương để người đọc chỉ tải phần đang đọc:
+  //   novels/<id>/<phiên bản>/toc.json   danh sách tên chương
+  //   novels/<id>/<phiên bản>/c<k>.json  chương k*50 .. k*50+49
+  const CHUNK = 50;
+  async function uploadPacks(id, chapters, progress) {
+    const dir = `novels/${id}/${stamp()}`;
+    const enc = new TextEncoder();
+    const jobs = [{ path: `${dir}/toc.json`, body: enc.encode(JSON.stringify({ v: 1, chunk: CHUNK, count: chapters.length, titles: chapters.map((c) => c.title) })) }];
+    for (let k = 0; k * CHUNK < chapters.length; k++) {
+      jobs.push({ path: `${dir}/c${k}.json`, body: enc.encode(JSON.stringify(chapters.slice(k * CHUNK, (k + 1) * CHUNK))) });
+    }
+    const total = jobs.reduce((s, j) => s + j.body.length, 0);
+    const sent = new Map();
+    let finished = 0, next = 0;
+    const report = () => {
+      const bytes = [...sent.values()].reduce((a, b) => a + b, 0);
+      progress(`Đang tải truyện lên… ${finished}/${jobs.length} gói · ${(bytes / 1048576).toFixed(1)}/${(total / 1048576).toFixed(1)} MB`, bytes / total);
+    };
+    const worker = async () => {
+      while (next < jobs.length) {
+        const j = jobs[next++];
+        for (let attempt = 1; ; attempt++) {
+          try { await Bunny.put(j.path, j.body, (r) => { sent.set(j.path, r * j.body.length); report(); }); break; }
+          catch (e) { if (attempt >= 3) throw e; await new Promise((r) => setTimeout(r, 1000 * attempt)); }
+        }
+        sent.set(j.path, j.body.length);
+        finished++;
+        report();
+      }
+    };
+    try { await Promise.all([1, 2, 3, 4].map(worker)); }
+    catch (e) { Bunny.del(asDir(dir)).catch(() => {}); throw e; }
+    return { dir, chunk: CHUNK, words: chapters.reduce((s, c) => s + c.content.split(/\s+/).filter(Boolean).length, 0) };
+  }
+
   async function saveNovel(orig, f, state) {
     const title = String(f.title || "").trim();
     if (!title) { toast("Thiếu tên truyện"); throw new Error("title"); }
@@ -486,14 +540,13 @@
     const oldFiles = [];
 
     await busy("Đang tải lên…", async (progress) => {
-      // Tên file mới mỗi lần thay để CDN không trả bản cũ.
-      if (state.epub) {
-        const path = `truyen/${id}-${stamp()}.epub`;
-        await Bunny.put(path, state.epub, (r) => progress(`Đang tải EPUB lên… ${Math.round(r * 100)}%`, r));
+      // Mỗi lần tải lên dùng thư mục/tên file mới để CDN không trả bản cũ.
+      if (state.chapters) {
+        const packs = await uploadPacks(id, state.chapters, progress);
+        if (orig && orig.dir) oldFiles.push(asDir(orig.dir));
         if (orig && orig.file) oldFiles.push(orig.file);
-        entry.file = path;
-        entry.chapters = state.chapters.length;
-        entry.updated = String(Date.now());
+        Object.assign(entry, packs, { chapters: state.chapters.length, updated: String(Date.now()) });
+        delete entry.file;
       }
       if (state.cover) {
         const path = `bia/${id}-${stamp()}.jpg`;
@@ -504,7 +557,7 @@
       progress("Đang cập nhật danh sách…", 1);
       for (const k of Object.keys(entry)) if (entry[k] === "" || (Array.isArray(entry[k]) && !entry[k].length)) delete entry[k];
       await mutate((c) => {
-        const i = orig ? c.novels.findIndex((x) => x.file === orig.file) : -1;
+        const i = orig ? c.novels.findIndex((x) => entryId(x) === entryId(orig)) : -1;
         if (i >= 0) c.novels[i] = entry; else c.novels.unshift(entry);
       });
       for (const p of oldFiles) await Bunny.del(p).catch(() => {});
