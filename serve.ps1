@@ -8,7 +8,8 @@ $root = Join-Path $PSScriptRoot "public"
 $mockRoot = Join-Path $PSScriptRoot "mock-bunny"
 $types = @{
   ".html" = "text/html; charset=utf-8"; ".js" = "text/javascript; charset=utf-8"; ".css" = "text/css; charset=utf-8"
-  ".json" = "application/json; charset=utf-8"; ".epub" = "application/epub+zip"; ".jpg" = "image/jpeg"; ".png" = "image/png"
+  ".json" = "application/json; charset=utf-8"; ".webmanifest" = "application/manifest+json"
+  ".epub" = "application/epub+zip"; ".jpg" = "image/jpeg"; ".png" = "image/png"
   ".webp" = "image/webp"; ".svg" = "image/svg+xml"; ".ico" = "image/x-icon"; ".mp3" = "audio/mpeg"; ".ogg" = "audio/ogg"; ".m4a" = "audio/mp4"
 }
 $utf8 = [Text.UTF8Encoding]::new($false)

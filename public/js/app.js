@@ -242,7 +242,9 @@
     const job = (async () => {
       const saved = await Chunks.get(key);
       if (saved) return saved.data;
-      const r = await fetch(cdnUrl(key));
+      const r = await fetch(cdnUrl(key)).catch(() => {
+        throw new Error(navigator.onLine ? "Không kết nối được máy chủ truyện." : "Phần này chưa được tải về máy. Hãy kết nối mạng để đọc tiếp.");
+      });
       if (!r.ok) throw new Error(`Không tải được dữ liệu truyện (${r.status})`);
       const data = await r.json();
       Chunks.put({ key, data, t: Date.now() }).catch(() => {});
@@ -274,6 +276,25 @@
     return pack[i - k * n.chunk];
   }
   const isLoaded = (n) => n.demo || (n.dir ? packs.has(`${n.dir}/toc.json`) : books.has(n.id));
+
+  // ---------- đọc offline: tải sẵn mọi gói của một truyện ----------
+  const packCount = (n) => Math.ceil(n.chapters / n.chunk);
+  async function savedPacks(n) {
+    const prefix = `${n.dir}/c`;
+    return (await Chunks.keys()).filter((k) => String(k).startsWith(prefix)).length;
+  }
+  async function downloadAll(n, onStep) {
+    const total = packCount(n);
+    let done = 0, next = 0;
+    const worker = async () => {
+      while (next < total) {
+        const k = next++;
+        await getPack(n.dir, `c${k}.json`);
+        onStep(++done, total);
+      }
+    };
+    await Promise.all([1, 2, 3].map(worker));
+  }
 
   // ---------- views ----------
   function coverHTML(n) {
@@ -313,6 +334,7 @@
     $app.innerHTML = `
       ${DEMO ? `<div class="notice">Đang chạy chế độ demo với truyện mẫu. Điền <code>cdnBase</code> trong <code>config.js</code> để đọc truyện từ Bunny.</div>` : ""}
       ${site.notice ? `<div class="notice">${esc(site.notice)}</div>` : ""}
+      ${navigator.onLine ? "" : `<div class="notice">Bạn đang ngoại tuyến. Vẫn đọc được các chương đã mở hoặc đã tải về máy.</div>`}
       ${recent.length && !q && !libState.tag ? `<h2 class="section-title">Đọc tiếp</h2><div class="grid">${recent.map(cardHTML).join("")}</div>` : ""}
       <h2 class="section-title">Thư viện</h2>
       <div class="toolbar"><input id="q" type="search" placeholder="Tìm tên truyện, tác giả…" value="${esc(libState.q)}"></div>
@@ -342,6 +364,9 @@
       <h2 class="section-title">Tủ sách của bạn</h2>
       ${list.length ? `<div class="grid">${list.map(cardHTML).join("")}</div>`
         : `<div class="empty">Tủ sách trống. Chọn truyện trong <a href="#/" class="link">Thư viện</a> để bắt đầu.</div>`}
+      ${/iphone|ipad|ipod/i.test(navigator.userAgent) && !navigator.standalone ? `
+      <h2 class="section-title">Cài lên iPhone / iPad</h2>
+      <p class="hint">Trong Safari, bấm nút <b>Chia sẻ</b> (ô vuông có mũi tên lên) rồi chọn <b>Thêm vào MH chính</b>. Ứng dụng sẽ mở toàn màn hình và đọc được các chương đã tải khi không có mạng.</p>` : ""}
       <h2 class="section-title">Dữ liệu trên máy này</h2>
       <p class="hint">Tiến độ đọc, tủ sách và cài đặt chỉ lưu trong trình duyệt này. Sao lưu để chuyển sang máy khác.</p>
       <div class="actions">
@@ -414,6 +439,7 @@
               <a class="btn" href="#/read/${encodeURIComponent(n.id)}/${p ? p.ch : 0}">${p ? `Đọc tiếp chương ${p.ch + 1}` : "Đọc từ đầu"}</a>
               ${p ? `<a class="btn ghost" href="#/read/${encodeURIComponent(n.id)}/0">Đọc từ đầu</a>` : ""}
               <button class="btn ghost" id="shelfBtn">${shelf.has(n.id) ? "✓ Trong tủ sách" : "＋ Thêm vào tủ"}</button>
+              ${n.dir && titles ? `<button class="btn ghost" id="offlineBtn" disabled>⤓ Tải về đọc offline</button>` : ""}
             </div>
             <div class="desc">${esc(n.description)}</div>
           </div>
@@ -426,6 +452,23 @@
         else { shelf.add(n.id); e.target.textContent = "✓ Trong tủ sách"; toast("Đã thêm vào tủ sách"); }
         saveShelf();
       });
+      const off = document.getElementById("offlineBtn");
+      if (off) {
+        const total = packCount(n);
+        const show = (have) => {
+          off.disabled = have >= total;
+          off.textContent = have >= total ? "✓ Đã tải về máy, đọc được offline" : have ? `⤓ Tải nốt để đọc offline (${have}/${total} phần)` : "⤓ Tải về đọc offline";
+        };
+        savedPacks(n).then(show);
+        off.onclick = async () => {
+          off.disabled = true;
+          try {
+            await downloadAll(n, (d, t) => { off.textContent = `Đang tải ${d}/${t} phần…`; });
+            show(total);
+            toast("Đã tải xong, đọc được cả khi không có mạng");
+          } catch (err) { toast(err.message); savedPacks(n).then(show); }
+        };
+      }
     };
 
     if (!isLoaded(n)) render(null);
@@ -678,6 +721,24 @@
       if (!stale()) notFound(err.message || "Có lỗi xảy ra.");
     }
   }
+
+  // ---------- cài như ứng dụng (PWA) ----------
+  if ("serviceWorker" in navigator && location.protocol !== "file:") {
+    addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+  }
+  const $install = document.getElementById("installBtn");
+  let installEvt = null;
+  addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvt = e; $install.hidden = false; });
+  $install.onclick = async () => {
+    if (!installEvt) return;
+    installEvt.prompt();
+    await installEvt.userChoice.catch(() => {});
+    installEvt = null;
+    $install.hidden = true;
+  };
+  addEventListener("appinstalled", () => { $install.hidden = true; toast("Đã cài lên máy, mở từ màn hình chính nhé"); });
+  addEventListener("offline", () => toast("Mất kết nối mạng. Vẫn đọc được các chương đã tải."));
+  addEventListener("online", () => toast("Đã có mạng trở lại"));
 
   addEventListener("hashchange", route);
   syncMusicButtons();
