@@ -346,7 +346,7 @@
         <div class="stats"><span>${cat.novels.length} truyện</span><span>${totalCh.toLocaleString("vi-VN")} chương</span><span>${cat.novels.filter((n) => n.hidden).length} đang ẩn</span></div>
       </div>
       <label class="drop" id="drop">
-        <input type="file" id="epubInput" accept="${BOOK_ACCEPT}" hidden>
+        <input type="file" id="epubInput" hidden>
         <b>＋ Thêm truyện: kéo thả file EPUB hoặc PRC/MOBI vào đây</b>
         <span class="hint">hoặc bấm để chọn file. Thông tin, ảnh bìa và số chương được đọc tự động.</span>
       </label>
@@ -433,9 +433,8 @@
   // Nhận diện theo nội dung để vẫn nhận khi tên file mất đuôi:
   //   EPUB = zip có mục "mimetype" ghi "application/epub+zip"
   //   PRC/MOBI/AZW3 = cơ sở dữ liệu Palm kiểu "BOOKMOBI" (hoặc "TEXtREAd")
-  // Không giới hạn loại file ở ô chọn: Windows / Android / iPhone không biết đuôi .prc .mobi .azw3
-  // nên làm mờ các file đó nếu có danh sách đuôi. Loại file được kiểm tra theo nội dung ở bookKind().
-  const BOOK_ACCEPT = "";
+  // Ô chọn file KHÔNG có thuộc tính accept: Windows / Android / iPhone không biết đuôi .prc .mobi .azw3
+  // nên làm mờ các file đó khi có accept (kể cả accept="" trên iOS). Loại file kiểm tra theo nội dung ở bookKind().
   async function bookKind(file) {
     try {
       const head = new Uint8Array(await file.slice(0, 80).arrayBuffer());
@@ -488,7 +487,7 @@
               ${coverSrc ? `<img src="${esc(coverSrc)}" alt="">` : `<div class="ph">Chưa có ảnh bìa</div>`}
               <div style="display:grid;gap:6px">
                 <label class="btn ghost small filebtn">Đổi ảnh bìa<input type="file" id="edCover" accept="image/*"></label>
-                <label class="btn ghost small filebtn">${orig ? "Thay file truyện" : "Chọn file khác"}<input type="file" id="edEpub" accept="${BOOK_ACCEPT}"></label>
+                <label class="btn ghost small filebtn">${orig ? "Thay file truyện" : "Chọn file khác"}<input type="file" id="edEpub"></label>
               </div>
             </div>
             <div class="form-grid">
