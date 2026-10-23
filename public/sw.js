@@ -1,12 +1,12 @@
 // Service worker: lưu khung ứng dụng để mở được khi không có mạng.
 // Nội dung chương do trang đọc tự lưu trong IndexedDB, nên ở đây không lưu gói chương hay EPUB.
 // Đổi VERSION khi thay danh sách CORE.
-const VERSION = "v3";
+const VERSION = "v4";
 const SHELL = `shell-${VERSION}`;
 const RUNTIME = "runtime-v1";
 const CORE = [
   "/", "/style.css", "/config.js", "/manifest.webmanifest",
-  "/js/app.js", "/js/music.js", "/js/tts.js", "/js/epub.js", "/js/demo-data.js",
+  "/js/app.js", "/js/music.js", "/js/tts.js", "/js/cloud.js", "/js/epub.js", "/js/demo-data.js",
   "/icons/icon-192.png", "/icons/favicon-64.png",
 ];
 
@@ -62,8 +62,9 @@ self.addEventListener("fetch", (e) => {
 
   // Danh sách truyện: ưu tiên bản mới, mất mạng thì dùng bản đã lưu.
   if (url.pathname.endsWith("/catalog.json")) return e.respondWith(networkFirst(req, RUNTIME));
-  // Ảnh bìa, phông chữ, thư viện JSZip: không đổi theo thời gian.
-  if (/\/bia\//.test(url.pathname) || /fonts\.(googleapis|gstatic)\.com$/.test(url.hostname) || url.hostname === "cdnjs.cloudflare.com") {
+  // Ảnh bìa, phông chữ, thư viện JSZip / Supabase (phiên bản cố định): không đổi theo thời gian.
+  if (/\/bia\//.test(url.pathname) || /fonts\.(googleapis|gstatic)\.com$/.test(url.hostname) ||
+      url.hostname === "cdnjs.cloudflare.com" || url.hostname === "cdn.jsdelivr.net") {
     return e.respondWith(cacheFirst(req, RUNTIME));
   }
   if (url.origin === location.origin) {

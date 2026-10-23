@@ -299,3 +299,25 @@ label.check { display: inline-flex !important; grid-auto-flow: column; align-ite
 .tts-hint { font-size: .78rem; color: var(--r-muted); margin-top: 6px; line-height: 1.5; }
 .tts-hint:empty { display: none; }
 .reader:has(.ttsbar:not([hidden])) .rnav { padding-bottom: 130px; }
+
+/* ---------- tài khoản ---------- */
+.auth-card {
+  max-width: 420px; margin: 24px auto; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 22px 22px 18px; box-shadow: var(--shadow);
+}
+.auth-card h2 { margin: 0 0 6px; font-family: "Noto Serif", serif; }
+.auth-card .who { font-weight: 600; margin: 4px 0 8px; word-break: break-all; }
+.auth-form { display: grid; gap: 12px; margin-top: 12px; }
+.auth-form label { display: grid; gap: 4px; font-size: .85rem; color: var(--muted); }
+.auth-form input {
+  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 12px;
+}
+.auth-form input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.auth-form .btn { padding: 11px; }
+.auth-card .error { color: var(--accent); min-height: 1.2em; margin: 0; font-size: .9rem; }
+.auth-links { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: .88rem; }
+.auth-links a { color: var(--accent); }
+.btn.wide { width: 100%; margin-top: 10px; }
+.or { text-align: center; color: var(--muted); font-size: .82rem; margin: 10px 0 0; }
+#accountLink { max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

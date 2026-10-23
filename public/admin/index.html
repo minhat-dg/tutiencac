@@ -12,6 +12,20 @@
 <body class="admin">
   <!-- Đăng nhập -->
   <section id="login" class="login" hidden>
+    <!-- Đăng nhập bằng tài khoản Supabase (khi config.js có supabaseUrl) -->
+    <form class="login-card" id="cloudForm" hidden>
+      <div class="login-logo">☯</div>
+      <h1>Quản trị Tu Tiên Các</h1>
+      <label for="cEmail">Email</label>
+      <input type="email" id="cEmail" autocomplete="email" required>
+      <label for="cPw">Mật khẩu</label>
+      <input type="password" id="cPw" autocomplete="current-password" required>
+      <button class="btn" type="submit" id="cloudBtn">Đăng nhập</button>
+      <p class="error" id="cloudError" role="alert"></p>
+      <p class="hint">Dùng tài khoản đã đăng ký ở trang đọc và đã được cấp quyền quản trị trên Supabase.</p>
+      <a href="#" class="hint link" id="useStorage">Dự phòng: đăng nhập bằng mật khẩu Storage</a>
+    </form>
+
     <form class="login-card" id="loginForm" autocomplete="off">
       <div class="login-logo">☯</div>
       <h1>Quản trị Tu Tiên Các</h1>
@@ -54,6 +68,7 @@
 
   <script src="/config.js"></script>
   <script src="/js/epub.js"></script>
+  <script src="/js/cloud.js"></script>
   <script src="/admin/admin.js"></script>
 </body>
 </html>

@@ -74,6 +74,50 @@ Khi đăng truyện, trang quản trị đọc EPUB rồi chia thành các gói 
    Thiếu bước này thì trang đọc không tải được truyện. Mục **Cài đặt** trong /admin có dòng kiểm tra kết nối.
 4. Pull Zone → **Caching**: kiểm tra **Vary Cache → URL Query String** đang bật. Khi đó truyện mới hiện trên trang đọc sau khoảng 1 phút.
 
+## Supabase: tài khoản người đọc + đăng nhập quản trị an toàn (tuỳ chọn)
+
+Khi bật:
+- **Người đọc** đăng nhập để tiến độ đọc và tủ sách tự đồng bộ giữa các máy. Không đăng nhập vẫn đọc bình thường.
+- **Admin** đăng nhập bằng tài khoản. Việc ghi lên Bunny đi qua Edge Function `bunny`, nên mật khẩu Storage chỉ nằm trên server Supabase.
+
+Các bước (làm trên dashboard Supabase, không cần cài gì):
+
+1. **SQL Editor → New query**: dán toàn bộ file [`supabase/schema.sql`](supabase/schema.sql) rồi bấm **Run**.
+2. **Authentication → URL Configuration**:
+   - *Site URL*: địa chỉ Vercel, ví dụ `https://tutiencac.vercel.app`.
+   - *Redirect URLs*: thêm `https://tutiencac.vercel.app/**` (và `http://localhost:5500/**` nếu chạy thử trên máy).
+3. **Edge Functions → Deploy a new function → Via Editor**:
+   - Đặt tên `bunny`.
+   - Dán nội dung [`supabase/functions/bunny/index.ts`](supabase/functions/bunny/index.ts).
+   - Bấm **Deploy**, để nguyên *Verify JWT* đang bật.
+4. **Edge Functions → Secrets**, thêm 3 biến:
+   - `BUNNY_STORAGE_ZONE` = tên Storage Zone, ví dụ `tutiencac`.
+   - `BUNNY_STORAGE_KEY` = mật khẩu Storage, lấy ở Bunny → Storage → FTP & API Access → Password.
+   - `BUNNY_STORAGE_HOST` = `storage.bunnycdn.com`, hoặc máy chủ theo vùng của zone.
+5. **Project Settings → API**: copy *Project URL* và khoá *anon public* vào `public/config.js`:
+   ```js
+   supabaseUrl: "https://xxxx.supabase.co",
+   supabaseAnonKey: "eyJ...",
+   ```
+   Khoá anon là khoá công khai, đưa lên web được. **Không** dùng khoá `service_role`.
+6. Deploy lại Vercel, mở trang đọc, bấm **Đăng nhập → Chưa có tài khoản? Đăng ký** để tạo tài khoản của bạn.
+7. Cấp quyền quản trị cho tài khoản đó trong **SQL Editor** (thay email):
+   ```sql
+   insert into public.admins (user_id)
+   select id from auth.users where email = 'email-cua-ban@example.com' on conflict do nothing;
+   ```
+8. Mở `/admin` và đăng nhập bằng email + mật khẩu vừa tạo. Vào **Cài đặt** và bấm xoá file `_admin/key.json` cũ nếu trang báo còn.
+
+Lưu ý:
+- **Email xác nhận**: Supabase chỉ gửi được vài email mỗi giờ bằng máy chủ mặc định.
+  - Khi có nhiều người đăng ký, cài SMTP riêng trong *Authentication → Emails*.
+  - Hoặc tắt *Confirm email* trong *Authentication → Providers → Email*.
+- **Đăng nhập Google**: bật trong *Authentication → Providers → Google*, rồi đặt `googleLogin: true` trong `config.js`.
+- **Gói miễn phí**: project bị tạm dừng nếu không có ai dùng trong 1 tuần. Vào dashboard bấm *Restore* là chạy lại. Trong lúc tạm dừng, trang đọc vẫn đọc được bình thường, chỉ không đồng bộ được.
+- **Đăng nhập dự phòng**: màn hình đăng nhập `/admin` vẫn có lựa chọn dùng mật khẩu Storage, phòng khi Supabase gặp sự cố.
+
+Chạy thử trên máy: `serve.ps1 -Mock` có giả lập cả Edge Function ở `/_mock/sb/functions/v1/bunny`. Token `tok-admin` là admin, `tok-user` là người dùng thường.
+
 ## Deploy lên Vercel
 
 1. Sửa `public/config.js`:

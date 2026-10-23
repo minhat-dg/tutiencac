@@ -61,6 +61,10 @@
   const cdnUrl = (p) => `${conn.cdn.replace(/\/+$/, "")}/${p.split("/").map(encodeURIComponent).join("/")}`;
 
   let accessKey = null;
+  // "cloud": đăng nhập bằng tài khoản Supabase, mọi thao tác Bunny đi qua Edge Function (khoá nằm trên server)
+  // "storage": dự phòng, trình duyệt gửi thẳng mật khẩu Storage tới Bunny
+  const Cloud = window.Cloud;
+  let mode = "storage";
 
   function xhr(method, url, { headers = {}, body = null, onProgress } = {}) {
     return new Promise((resolve, reject) => {
@@ -76,16 +80,24 @@
 
   const Bunny = {
     url(path = "") {
+      if (mode === "cloud") return `${Cloud.url}/functions/v1/bunny?path=${encodeURIComponent(path)}`;
       const host = /^https?:\/\//.test(conn.host) ? conn.host : "https://" + conn.host;
       return `${host.replace(/\/+$/, "")}/${encodeURIComponent(conn.zone)}/${path.split("/").map(encodeURIComponent).join("/")}`;
     },
     async req(method, path, { body, onProgress, allow404 } = {}) {
-      const headers = { AccessKey: accessKey };
+      const headers = mode === "cloud"
+        ? { Authorization: `Bearer ${await Cloud.freshToken()}`, apikey: Cloud.anonKey }
+        : { AccessKey: accessKey };
       if (body != null) headers["Content-Type"] = "application/octet-stream";
       const x = await xhr(method, this.url(path), { headers, body, onProgress });
       if (x.status === 404 && allow404) return null;
-      if (x.status === 401) throw Object.assign(new Error("Mật khẩu Storage không đúng"), { auth: true });
-      if (x.status < 200 || x.status >= 300) throw new Error(`Bunny báo lỗi ${x.status} khi ${method} ${path || "/"}`);
+      if (x.status === 401) throw Object.assign(new Error(mode === "cloud" ? "Phiên đăng nhập đã hết, hãy đăng nhập lại" : "Mật khẩu Storage không đúng"), { auth: true });
+      if (x.status === 403) throw Object.assign(new Error("Tài khoản này chưa có quyền quản trị"), { forbidden: true });
+      if (x.status < 200 || x.status >= 300) {
+        let detail = "";
+        try { detail = JSON.parse(x.responseText).error || ""; } catch {}
+        throw new Error(detail || `Bunny báo lỗi ${x.status} khi ${method} ${path || "/"}`);
+      }
       return x;
     },
     // Bunny Storage answers 401 (not 404) for a file that does not exist. If the key still
@@ -173,10 +185,15 @@
   }
   let regionNotice = "";
 
+  let storageFallback = false; // người dùng chọn đăng nhập dự phòng bằng mật khẩu Storage
   function showLogin(msg) {
     $("shell").hidden = true;
     $("login").hidden = false;
-    $("loginError").textContent = msg || "";
+    const cloudUi = Cloud.enabled && !storageFallback;
+    $("cloudForm").hidden = !cloudUi;
+    $("loginForm").hidden = cloudUi;
+    $(cloudUi ? "cloudError" : "loginError").textContent = msg || "";
+    if (cloudUi) { $("cEmail").focus(); return; }
     $("cZone").value = conn.zone;
     $("cCdn").value = conn.cdn;
     $("cHost").value = conn.host;
@@ -208,9 +225,45 @@
     }
   });
 
-  function logout() {
+  // Đăng nhập bằng tài khoản Supabase: Edge Function kiểm tra quyền admin ở mỗi yêu cầu.
+  async function enterCloud() {
+    mode = "cloud";
+    try { await Bunny.req("GET", ""); }
+    catch (e) {
+      mode = "storage";
+      if (e.forbidden) {
+        const email = Cloud.user ? Cloud.user.email : "";
+        await Cloud.signOut();
+        throw new Error(`Tài khoản ${email} chưa có quyền quản trị. Thêm tài khoản này vào bảng admins (xem README, mục Supabase).`);
+      }
+      if (/Failed to fetch|kết nối/i.test(e.message) || e.auth) throw new Error("Không gọi được Edge Function “bunny”. Kiểm tra đã deploy function và đặt Secrets chưa (xem README).");
+      throw e;
+    }
+    await enter();
+  }
+
+  $("cloudForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $("cloudBtn");
+    btn.disabled = true; btn.textContent = "Đang kiểm tra…";
+    $("cloudError").textContent = "";
+    try {
+      await Cloud.signIn($("cEmail").value.trim(), $("cPw").value);
+      $("cPw").value = "";
+      await enterCloud();
+    } catch (err) {
+      $("cloudError").textContent = err.message;
+    } finally {
+      btn.disabled = false; btn.textContent = "Đăng nhập";
+    }
+  });
+  $("useStorage").onclick = (e) => { e.preventDefault(); storageFallback = true; showLogin(); };
+
+  async function logout() {
     store.del("admin-key");
     accessKey = null;
+    if (mode === "cloud") await Cloud.signOut();
+    mode = "storage";
     showLogin();
   }
   $("logoutBtn").onclick = logout;
@@ -264,7 +317,7 @@
     if (tab === "caidat") return viewSettings();
     return viewNovels();
   }
-  addEventListener("hashchange", () => { if (accessKey) render(); });
+  addEventListener("hashchange", () => { if (!$("shell").hidden) render(); });
 
   function thumbHTML(n) {
     if (n.cover) return `<img class="thumb" src="${esc(cdnUrl(n.cover))}" alt="" loading="lazy">`;
@@ -636,6 +689,15 @@
         </form>
       </section>
 
+      ${mode === "cloud" ? `
+      <section class="box settings-box">
+        <h3>Đăng nhập quản trị</h3>
+        <p class="hint">Đang đăng nhập bằng tài khoản <b>${esc(Cloud.user ? Cloud.user.email : "")}</b> qua Supabase.
+          Mật khẩu Storage nằm trong Secrets của Edge Function, trình duyệt không giữ.
+          Muốn thêm người quản trị: cho họ đăng ký ở trang đọc, rồi thêm email vào bảng <code>admins</code> (xem README).</p>
+        <p class="hint" id="oldKey" hidden>Vẫn còn file <code>_admin/key.json</code> của cách đăng nhập cũ. Không cần nữa, nên xoá.
+          <button class="btn ghost small" type="button" id="oldKeyDel">Xoá file này</button></p>
+      </section>` : `
       <section class="box settings-box">
         <h3>Mật khẩu quản trị</h3>
         <p class="hint" id="pwStatus">Đang kiểm tra…</p>
@@ -646,8 +708,9 @@
           </div>
           <div class="actions"><button class="btn">Đặt mật khẩu</button><button class="btn ghost" type="button" id="pwRemove" hidden>Xoá mật khẩu quản trị</button></div>
         </form>
-        <p class="hint">Mật khẩu quản trị dùng để mã hoá mật khẩu Storage, bản mã được lưu tại <code>_admin/key.json</code> trên Bunny. Bản mã này ai cũng tải được, nên hãy chọn mật khẩu dài, khó đoán. Mật khẩu Storage gốc lúc nào cũng đăng nhập được.</p>
-      </section>
+        <p class="hint">Mật khẩu quản trị dùng để mã hoá mật khẩu Storage, bản mã được lưu tại <code>_admin/key.json</code> trên Bunny. Bản mã này ai cũng tải được, nên hãy chọn mật khẩu dài, khó đoán. Mật khẩu Storage gốc lúc nào cũng đăng nhập được.
+          ${Cloud.enabled ? "" : "<br>An toàn hơn: bật Supabase (xem README) để đăng nhập bằng tài khoản và giữ mật khẩu Storage trên server."}</p>
+      </section>`}
 
       <section class="box settings-box">
         <h3>Kết nối Bunny</h3>
@@ -671,11 +734,16 @@
     };
 
     const sealed = await Bunny.getJSON("_admin/key.json").catch(() => null);
-    if ($("pwStatus")) {
+    if (mode === "cloud") {
+      if (sealed && $("oldKey")) {
+        $("oldKey").hidden = false;
+        $("oldKeyDel").onclick = () => busy("Đang xoá…", () => Bunny.del("_admin/key.json")).then(() => { toast("Đã xoá"); viewSettings(); }, () => {});
+      }
+    } else if ($("pwStatus")) {
       $("pwStatus").innerHTML = sealed ? `<span class="ok">✓ Đã đặt mật khẩu quản trị.</span> Đặt lại bên dưới nếu muốn đổi.` : "Chưa đặt. Hiện chỉ đăng nhập được bằng mật khẩu Storage.";
       $("pwRemove").hidden = !sealed;
     }
-    $("pwForm").onsubmit = async (e) => {
+    if ($("pwForm")) $("pwForm").onsubmit = async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
       if (fd.get("p1") !== fd.get("p2")) return toast("Hai mật khẩu không khớp");
@@ -684,7 +752,7 @@
         await Bunny.put("_admin/key.json", JSON.stringify(await seal(accessKey, String(fd.get("p1")))));
       }).then(() => { toast("Đã đặt mật khẩu quản trị"); viewSettings(); }, () => {});
     };
-    $("pwRemove").onclick = async () => {
+    if ($("pwRemove")) $("pwRemove").onclick = async () => {
       if (!confirm("Xoá mật khẩu quản trị? Sau đó chỉ đăng nhập được bằng mật khẩu Storage.")) return;
       await busy("Đang xoá…", () => Bunny.del("_admin/key.json")).then(() => { toast("Đã xoá"); viewSettings(); }, () => {});
     };
@@ -715,6 +783,10 @@
   }
 
   (async () => {
+    await Cloud.ready;
+    if (Cloud.enabled && Cloud.user) {
+      try { return await enterCloud(); } catch (err) { return showLogin(err.message); }
+    }
     const saved = store.get("admin-key", sessionStorage) || store.get("admin-key");
     if (saved && conn.zone) {
       try { if (await verify(saved)) return enter(); } catch {}

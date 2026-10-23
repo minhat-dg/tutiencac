@@ -21,9 +21,77 @@
   const saveSettings = () => LS.set("settings", settings);
   // progress: { [novelId]: { ch, scroll, t, read: [chapterIdx...] } }
   let progress = LS.get("progress", {});
-  const saveProgress = () => LS.set("progress", progress);
+  const saveProgress = () => { LS.set("progress", progress); cloudChanged(); };
   let shelf = new Set(LS.get("shelf", []));
-  const saveShelf = () => LS.set("shelf", [...shelf]);
+  // shelfLog: { [novelId]: { on, t } } — nhớ cả lần bỏ khỏi tủ để đồng bộ giữa các máy cho đúng
+  let shelfLog = LS.get("shelfLog", null) || Object.fromEntries([...shelf].map((id) => [id, { on: true, t: 0 }]));
+  const saveShelf = () => { LS.set("shelf", [...shelf]); LS.set("shelfLog", shelfLog); cloudChanged(); };
+  function setShelf(id, on) {
+    shelfLog[id] = { on, t: Date.now() };
+    if (on) shelf.add(id); else shelf.delete(id);
+    saveShelf();
+  }
+
+  // ---------- đồng bộ qua tài khoản (Supabase) ----------
+  const Cloud = window.Cloud;
+  let syncTimer = 0, syncDirty = false, lastSync = 0, lastPull = 0;
+  const syncPayload = () => ({ v: 1, progress, shelf: shelfLog });
+
+  function cloudChanged() {
+    if (!Cloud.user) return;
+    syncDirty = true;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(pushNow, 4000);
+  }
+  async function pushNow() {
+    clearTimeout(syncTimer);
+    if (!Cloud.user || !syncDirty || !navigator.onLine) return;
+    syncDirty = false;
+    try { await Cloud.save(syncPayload()); lastSync = Date.now(); }
+    catch (e) { syncDirty = true; console.warn(e); }
+  }
+  // Gộp dữ liệu trên máy với dữ liệu trong tài khoản: mục nào mới hơn thì giữ.
+  function mergeRemote(remote) {
+    let changed = false;
+    for (const [id, p] of Object.entries((remote && remote.progress) || {})) {
+      const mine = progress[id];
+      if (!mine || (p.t || 0) > (mine.t || 0)) {
+        progress[id] = { ...p, read: [...new Set([...(mine ? mine.read : []), ...(p.read || [])])] };
+        changed = true;
+      } else if (p.read && p.read.some((c) => !mine.read.includes(c))) {
+        mine.read = [...new Set([...mine.read, ...p.read])];
+        changed = true;
+      }
+    }
+    for (const [id, s] of Object.entries((remote && remote.shelf) || {})) {
+      if (!shelfLog[id] || (s.t || 0) > (shelfLog[id].t || 0)) {
+        shelfLog[id] = s;
+        if (s.on) shelf.add(id); else shelf.delete(id);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+  async function pullNow(rerender) {
+    if (!Cloud.user || !navigator.onLine) return;
+    lastPull = Date.now();
+    try {
+      const changed = mergeRemote(await Cloud.load());
+      LS.set("progress", progress);
+      LS.set("shelf", [...shelf]);
+      LS.set("shelfLog", shelfLog);
+      syncDirty = true;
+      await pushNow();
+      if (changed && rerender && !location.hash.startsWith("#/read/")) route();
+    } catch (e) { console.warn(e); }
+  }
+  addEventListener("pagehide", () => { if (syncDirty && Cloud.user) Cloud.saveOnExit(syncPayload()); });
+  document.addEventListener("visibilitychange", () => {
+    if (!Cloud.user) return;
+    if (document.hidden) { if (syncDirty) Cloud.saveOnExit(syncPayload()); syncDirty = false; }
+    else if (Date.now() - lastPull > 30000) pullNow(true); // quay lại tab: lấy tiến độ từ máy khác
+  });
+  addEventListener("online", () => { if (Cloud.user) pushNow(); });
 
   // ---------- IndexedDB: whole EPUBs ("books") and chapter packs ("chunks") read on this device ----------
   function store(name, keyPath) {
@@ -392,7 +460,7 @@
         if (d.app !== "tutiencac") throw new Error();
         // keep whichever entry was read more recently
         for (const [id, p] of Object.entries(d.progress || {})) if (!progress[id] || progress[id].t < p.t) progress[id] = p;
-        (d.shelf || []).forEach((id) => shelf.add(id));
+        (d.shelf || []).forEach((id) => { if (!shelf.has(id)) setShelf(id, true); });
         Object.assign(settings, d.settings || {});
         saveProgress(); saveShelf(); saveSettings();
         toast("Đã khôi phục dữ liệu");
@@ -448,9 +516,8 @@
         ${titles ? chapterListHTML(n, titles) : `<div class="loading" id="dl"><div class="bar"><div id="dlBar"></div></div><span id="dlText">Đang tải truyện…</span></div>`}
       `;
       document.getElementById("shelfBtn").addEventListener("click", (e) => {
-        if (shelf.has(n.id)) { shelf.delete(n.id); e.target.textContent = "＋ Thêm vào tủ"; toast("Đã bỏ khỏi tủ sách"); }
-        else { shelf.add(n.id); e.target.textContent = "✓ Trong tủ sách"; toast("Đã thêm vào tủ sách"); }
-        saveShelf();
+        if (shelf.has(n.id)) { setShelf(n.id, false); e.target.textContent = "＋ Thêm vào tủ"; toast("Đã bỏ khỏi tủ sách"); }
+        else { setShelf(n.id, true); e.target.textContent = "✓ Trong tủ sách"; toast("Đã thêm vào tủ sách"); }
       });
       const off = document.getElementById("offlineBtn");
       if (off) {
@@ -478,6 +545,110 @@
       if (txt) txt.textContent = `Đang tải truyện… ${Math.round(r * 100)}%`;
     });
     if (!stale()) render(titles);
+  }
+
+  // ---------- tài khoản ----------
+  let authMode = "in";     // in: đăng nhập · up: đăng ký · forgot: quên mật khẩu
+  let recovering = false;  // vừa mở liên kết đặt lại mật khẩu trong email
+
+  async function viewAccount() {
+    if (!Cloud.enabled) {
+      $app.innerHTML = `<div class="empty">Trang này chưa bật tài khoản. Tiến độ đọc vẫn được lưu trên máy này.</div>`;
+      return;
+    }
+    $app.innerHTML = `<div class="loading">Đang tải…</div>`;
+    await Cloud.ready;
+    const u = Cloud.user;
+
+    if (u && recovering) {
+      $app.innerHTML = `
+        <section class="auth-card">
+          <h2>Đặt mật khẩu mới</h2>
+          <form id="pwForm" class="auth-form">
+            <label>Mật khẩu mới<input type="password" name="pw" minlength="6" autocomplete="new-password" required></label>
+            <button class="btn">Lưu mật khẩu</button>
+            <p class="error" id="authErr"></p>
+          </form>
+        </section>`;
+      document.getElementById("pwForm").onsubmit = async (e) => {
+        e.preventDefault();
+        try { await Cloud.updatePassword(new FormData(e.target).get("pw")); recovering = false; toast("Đã đổi mật khẩu"); viewAccount(); }
+        catch (err) { document.getElementById("authErr").textContent = err.message; }
+      };
+      return;
+    }
+
+    if (u) {
+      $app.innerHTML = `
+        <section class="auth-card">
+          <h2>Tài khoản</h2>
+          <p class="who">${esc(u.email || "")}</p>
+          <p class="hint">Tiến độ đọc và tủ sách tự đồng bộ giữa các máy đăng nhập cùng tài khoản.
+            ${lastSync ? `Đồng bộ lần cuối ${timeAgo(lastSync)}.` : ""}</p>
+          <div class="actions">
+            <button class="btn" id="syncBtn">⟳ Đồng bộ ngay</button>
+            <button class="btn ghost" id="outBtn">Đăng xuất</button>
+          </div>
+        </section>`;
+      document.getElementById("syncBtn").onclick = async (e) => {
+        e.target.disabled = true;
+        await pullNow(false);
+        toast(navigator.onLine ? "Đã đồng bộ" : "Đang ngoại tuyến, sẽ đồng bộ khi có mạng");
+        viewAccount();
+      };
+      document.getElementById("outBtn").onclick = async () => {
+        await pushNow();
+        await Cloud.signOut();
+        toast("Đã đăng xuất. Dữ liệu đọc vẫn còn trên máy này.");
+      };
+      return;
+    }
+
+    const titles = { in: "Đăng nhập", up: "Tạo tài khoản", forgot: "Quên mật khẩu" };
+    $app.innerHTML = `
+      <section class="auth-card">
+        <h2>${titles[authMode]}</h2>
+        <p class="hint">Không đăng nhập vẫn đọc bình thường. Đăng nhập để giữ tiến độ đọc và tủ sách trên mọi máy.</p>
+        ${CFG.googleLogin && authMode !== "forgot" ? `<button class="btn ghost wide" id="googleBtn">Tiếp tục với Google</button><div class="or">hoặc</div>` : ""}
+        <form id="authForm" class="auth-form">
+          <label>Email<input type="email" name="email" autocomplete="email" required></label>
+          ${authMode !== "forgot" ? `<label>Mật khẩu<input type="password" name="pw" minlength="6" autocomplete="${authMode === "up" ? "new-password" : "current-password"}" required></label>` : ""}
+          <button class="btn">${authMode === "in" ? "Đăng nhập" : authMode === "up" ? "Tạo tài khoản" : "Gửi liên kết đặt lại"}</button>
+          <p class="error" id="authErr" role="alert"></p>
+        </form>
+        <div class="auth-links">
+          ${authMode !== "in" ? `<a href="#" data-mode="in">Đã có tài khoản? Đăng nhập</a>` : `<a href="#" data-mode="up">Chưa có tài khoản? Đăng ký</a><a href="#" data-mode="forgot">Quên mật khẩu?</a>`}
+        </div>
+      </section>`;
+    $app.querySelectorAll("[data-mode]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); authMode = a.dataset.mode; viewAccount(); }));
+    const g = document.getElementById("googleBtn");
+    if (g) g.onclick = () => Cloud.signInWithGoogle().catch((err) => toast(err.message));
+    document.getElementById("authForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target), btn = e.target.querySelector("button"), err = document.getElementById("authErr");
+      btn.disabled = true; err.textContent = "";
+      try {
+        const email = String(fd.get("email")).trim();
+        if (authMode === "in") await Cloud.signIn(email, fd.get("pw"));
+        else if (authMode === "up") {
+          const confirm = await Cloud.signUp(email, fd.get("pw"));
+          if (confirm) { authMode = "in"; viewAccount(); return toast("Đã gửi thư xác nhận. Mở email rồi bấm liên kết để kích hoạt tài khoản."); }
+        } else {
+          await Cloud.resetPassword(email);
+          authMode = "in"; viewAccount();
+          return toast("Đã gửi liên kết đặt lại mật khẩu vào email");
+        }
+      } catch (ex) { err.textContent = ex.message; btn.disabled = false; }
+    };
+  }
+
+  function renderAccountLink() {
+    const a = document.getElementById("accountLink");
+    if (!a) return;
+    a.hidden = !Cloud.enabled;
+    const u = Cloud.user;
+    a.textContent = u ? (u.email || "Tài khoản").split("@")[0] : "Đăng nhập";
+    a.title = u ? `Đã đăng nhập: ${u.email}` : "Đăng nhập để đồng bộ tiến độ";
   }
 
   function notFound(msg) {
@@ -780,6 +951,7 @@
     try {
       switch (parts[0]) {
         case "shelf": return viewShelf();
+        case "account": return await viewAccount();
         case "novel": return await viewNovel(parts[1], stale);
         case "read": return await viewReader(parts[1], parseInt(parts[2], 10) || 0, stale);
         default: return viewHome();
@@ -807,6 +979,18 @@
   addEventListener("appinstalled", () => { $install.hidden = true; toast("Đã cài lên máy, mở từ màn hình chính nhé"); });
   addEventListener("offline", () => toast("Mất kết nối mạng. Vẫn đọc được các chương đã tải."));
   addEventListener("online", () => toast("Đã có mạng trở lại"));
+
+  // ---------- tài khoản: theo dõi đăng nhập / đăng xuất ----------
+  Cloud.on((evt) => {
+    renderAccountLink();
+    if (evt === "PASSWORD_RECOVERY") { recovering = true; location.hash = "#/account"; return route(); }
+    if (evt === "SIGNED_IN") {
+      pullNow(true);
+      if (location.hash.startsWith("#/account")) { toast("Đã đăng nhập, đang đồng bộ tiến độ"); route(); }
+    }
+    if (evt === "SIGNED_OUT" && location.hash.startsWith("#/account")) route();
+  });
+  Cloud.ready.then(() => { renderAccountLink(); if (Cloud.user) pullNow(true); });
 
   addEventListener("hashchange", route);
   syncMusicButtons();

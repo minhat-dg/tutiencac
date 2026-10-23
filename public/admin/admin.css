@@ -3,6 +3,7 @@
 
 /* ---------- login ---------- */
 .login { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
+.login-card a.link { text-align: center; }
 .login-card {
   width: min(380px, 100%); background: var(--surface); border: 1px solid var(--border);
   border-radius: 16px; padding: 28px 24px; box-shadow: var(--shadow); display: grid; gap: 10px;

@@ -25,15 +25,15 @@ function TypeOf($file) {
 }
 
 # Very small imitation of the Bunny Storage HTTP API.
-function MockBunny($ctx, $rel) {
+function MockBunny($ctx, $rel, [bool]$viaFunction = $false) {
   $req = $ctx.Request; $res = $ctx.Response; $m = $req.HttpMethod
   $res.AddHeader("Access-Control-Allow-Origin", "*")
-  $res.AddHeader("Access-Control-Allow-Headers", "AccessKey, Content-Type")
+  $res.AddHeader("Access-Control-Allow-Headers", "AccessKey, Content-Type, Authorization, apikey")
   $res.AddHeader("Access-Control-Allow-Methods", "GET, HEAD, PUT, DELETE, OPTIONS")
   if ($m -eq "OPTIONS") { $res.StatusCode = 204; return }
   $target = [IO.Path]::GetFullPath((Join-Path $mockRoot $rel))
   if (-not ($target + "\").StartsWith($mockRoot + "\")) { $res.StatusCode = 400; return }
-  $authed = $req.Headers["AccessKey"] -eq "devkey"
+  $authed = $viaFunction -or ($req.Headers["AccessKey"] -eq "devkey")
   $isDir = $rel.EndsWith("/") -or $rel -notmatch '/'
   if ($m -eq "GET" -and $isDir) {
     if (-not $authed) { $res.StatusCode = 401; return }
@@ -68,6 +68,23 @@ function MockBunny($ctx, $rel) {
   $res.StatusCode = 405
 }
 
+# Imitation of the Supabase Edge Function "bunny" (supabase/functions/bunny):
+# token "tok-admin" = admin, "tok-user" = signed in without admin rights.
+function MockFunction($ctx) {
+  $req = $ctx.Request; $res = $ctx.Response
+  if ($req.HttpMethod -eq "OPTIONS") { return MockBunny $ctx "test/" $true }
+  $path = ""
+  foreach ($pair in $req.Url.Query.TrimStart('?').Split('&')) {
+    $kv = $pair.Split('=', 2)
+    if ($kv[0] -eq "path" -and $kv.Length -eq 2) { $path = [Uri]::UnescapeDataString($kv[1]) }
+  }
+  $auth = [string]$req.Headers["Authorization"]
+  if ($auth -eq "Bearer tok-admin") { return MockBunny $ctx ("test/" + $path) $true }
+  $res.AddHeader("Access-Control-Allow-Origin", "*")
+  $res.StatusCode = $(if ($auth -eq "Bearer tok-user") { 403 } else { 401 })
+  SendBytes $res $utf8.GetBytes('{"error":"mock"}') "application/json" $req.HttpMethod
+}
+
 $listener = [Net.HttpListener]::new()
 $listener.Prefixes.Add("http://localhost:$Port/")
 $listener.Start()
@@ -82,6 +99,7 @@ try {
     try {
       $res.AddHeader("Cache-Control", "no-store")
       $path = [Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath).TrimStart("/")
+      if ($Mock -and $path.StartsWith("_mock/sb/functions/v1/bunny")) { MockFunction $ctx; continue }
       if ($Mock -and $path.StartsWith("_mock/")) { MockBunny $ctx $path.Substring(6); continue }
       $file = [IO.Path]::GetFullPath((Join-Path $root $path))
       if (Test-Path -LiteralPath $file -PathType Container) { $file = Join-Path $file "index.html" }

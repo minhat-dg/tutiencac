@@ -7,4 +7,11 @@ window.TT_CONFIG = {
   // Dùng cho trang quản trị /admin.
   storageZone: "tutiencac",                     // tên Storage Zone, ví dụ "tutien"
   storageHost: "storage.bunnycdn.com", // theo vùng của Storage Zone, ví dụ "sg.storage.bunnycdn.com"
+
+  // Tài khoản người đọc + trang quản trị qua Supabase (tuỳ chọn, để trống = tắt).
+  // Lấy ở Supabase → Project Settings → API: "Project URL" và khoá "anon public".
+  // Khoá anon là khoá công khai, đưa lên web được. KHÔNG điền khoá service_role ở đây.
+  supabaseUrl: "",
+  supabaseAnonKey: "",
+  googleLogin: false, // true sau khi bật Google trong Supabase → Authentication → Providers
 };
