@@ -237,8 +237,11 @@
     if (s.name) {
       siteName = s.name;
       document.title = s.name;
-      const b = document.querySelector(".brand-text");
-      if (b) b.textContent = " " + s.name;
+      // logo chữ thư pháp là "Tu tiên các"; đặt tên khác thì hiện tên bằng chữ thường
+      const custom = fold(s.name) !== "tu tien cac";
+      const word = document.querySelector(".brand-word"), text = document.querySelector(".brand-text");
+      if (word) word.hidden = custom;
+      if (text) { text.hidden = !custom; text.textContent = s.name; }
     }
   }
 
@@ -408,14 +411,18 @@
     </a>`;
   }
 
-  const libState = { q: "", tag: "" };
+  const libState = { q: "", tag: "", cat: "" };
+  // so sánh không dấu, không phân biệt hoa thường: "Tiên hiệp" ~ "tien hiep"
+  const fold = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toLowerCase().trim();
+  const inCat = (n, cat) => n.tags.some((t) => fold(t).includes(fold(cat)));
 
   function viewHome() {
     const allTags = [...new Set(novels.flatMap((n) => n.tags))];
-    const q = libState.q.trim().toLowerCase();
+    const q = fold(libState.q);
     const list = novels.filter((n) =>
       (!libState.tag || n.tags.includes(libState.tag)) &&
-      (!q || n.title.toLowerCase().includes(q) || n.author.toLowerCase().includes(q))
+      (!libState.cat || inCat(n, libState.cat)) &&
+      (!q || fold(n.title).includes(q) || fold(n.author).includes(q))
     );
     const recent = novels.filter((n) => progress[n.id]).sort((a, b) => progress[b.id].t - progress[a.id].t).slice(0, 6);
 
@@ -424,26 +431,47 @@
       ${site.notice ? `<div class="notice">${esc(site.notice)}</div>` : ""}
       ${navigator.onLine ? "" : `<div class="notice">Bạn đang ngoại tuyến. Vẫn đọc được các chương đã mở hoặc đã tải về máy.</div>`}
       ${navigator.onLine && libraryStale ? `<div class="notice">Không tải được danh sách truyện mới nhất, đang hiện danh sách đã lưu lần trước.</div>` : ""}
-      ${recent.length && !q && !libState.tag ? `<h2 class="section-title">Đọc tiếp</h2><div class="grid">${recent.map(cardHTML).join("")}</div>` : ""}
-      <h2 class="section-title">Thư viện</h2>
-      <div class="toolbar"><input id="q" type="search" placeholder="Tìm tên truyện, tác giả…" value="${esc(libState.q)}"></div>
-      ${allTags.length ? `<div class="tags">
+      ${recent.length && !q && !libState.tag && !libState.cat ? `<h2 class="section-title">Đọc tiếp</h2><div class="grid">${recent.map(cardHTML).join("")}</div>` : ""}
+      <h2 class="section-title">${q ? `Kết quả cho “${esc(libState.q.trim())}”` : libState.cat ? esc(catLabel(libState.cat)) : "Thư viện"}</h2>
+      ${allTags.length && !libState.cat ? `<div class="tags">
         <button class="tag ${!libState.tag ? "active" : ""}" data-tag="">Tất cả</button>
         ${allTags.map((t) => `<button class="tag ${libState.tag === t ? "active" : ""}" data-tag="${esc(t)}">${esc(t)}</button>`).join("")}
       </div>` : ""}
       ${list.length ? `<div class="grid">${list.map(cardHTML).join("")}</div>` : `<div class="empty">${novels.length ? "Không tìm thấy truyện nào." : "Chưa có truyện nào."}</div>`}
     `;
-    const qi = document.getElementById("q");
-    qi.addEventListener("input", () => {
-      libState.q = qi.value;
-      const pos = qi.selectionStart;
-      viewHome();
-      const el = document.getElementById("q");
-      el.focus(); el.setSelectionRange(pos, pos);
-    });
     $app.querySelectorAll("[data-tag]").forEach((b) =>
       b.addEventListener("click", () => { libState.tag = b.dataset.tag; viewHome(); })
     );
+  }
+
+  const CATS = { "tiên hiệp": "Tiên hiệp", "huyền huyễn": "Huyền huyễn", "kiếm hiệp": "Kiếm hiệp", "đồng nhân": "Đồng nhân" };
+  const catLabel = (c) => CATS[c] || c;
+
+  // Thể loại: mọi nhãn đang có, kèm số truyện
+  function viewGenres() {
+    const counts = new Map();
+    for (const n of novels) for (const t of n.tags) counts.set(t, (counts.get(t) || 0) + 1);
+    const tags = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "vi"));
+    $app.innerHTML = `
+      <h2 class="section-title">Thể loại</h2>
+      ${tags.length ? `<div class="genres">${tags.map(([t, c]) =>
+        `<button class="genre" data-tag="${esc(t)}"><span>${esc(t)}</span><small>${c} truyện</small></button>`).join("")}</div>`
+        : `<div class="empty">Chưa có thể loại nào. Admin thêm thể loại khi đăng truyện.</div>`}`;
+    $app.querySelectorAll("[data-tag]").forEach((b) => (b.onclick = () => {
+      Object.assign(libState, { tag: b.dataset.tag, cat: "", q: "" });
+      document.getElementById("q").value = "";
+      location.hash = "#/";
+    }));
+  }
+
+  // Truyện mới: truyện vừa đăng / vừa thêm chương lên đầu
+  function viewNew() {
+    const list = novels.map((n, i) => ({ n, i }))
+      .sort((a, b) => (+b.n.updated || 0) - (+a.n.updated || 0) || a.i - b.i)
+      .map(({ n }) => n);
+    $app.innerHTML = `
+      <h2 class="section-title">Truyện mới cập nhật</h2>
+      ${list.length ? `<div class="grid">${list.map(cardHTML).join("")}</div>` : `<div class="empty">Chưa có truyện nào.</div>`}`;
   }
 
   function viewShelf() {
@@ -967,11 +995,18 @@
     if (readerCleanup) { readerCleanup(); readerCleanup = null; }
     const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
     if (parts[0] !== "read") { ttsAutoStart = false; window.TTS.stop(); window.Music.duck(false); }
-    document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === (parts[0] || "home")));
+    const page = parts[0] || "home";
+    document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === page));
+    // trang chủ: đầu trang lớn có ô tìm kiếm + thanh thể loại; các trang khác: đầu trang gọn
+    document.getElementById("siteHeader").classList.toggle("compact", page !== "home");
+    document.getElementById("catbar").hidden = page !== "home";
+    document.querySelectorAll("[data-cat]").forEach((b) => b.classList.toggle("active", !!b.dataset.cat && b.dataset.cat === libState.cat));
     window.scrollTo(0, 0);
     try {
       switch (parts[0]) {
         case "shelf": return viewShelf();
+        case "the-loai": return viewGenres();
+        case "moi": return viewNew();
         case "account": return await viewAccount();
         case "novel": return await viewNovel(parts[1], stale);
         case "read": return await viewReader(parts[1], parseInt(parts[2], 10) || 0, stale);
@@ -982,6 +1017,27 @@
       if (!stale()) notFound(err.message || "Có lỗi xảy ra.");
     }
   }
+
+  // ---------- ô tìm kiếm + thanh thể loại ở đầu trang ----------
+  const $q = document.getElementById("q");
+  $q.addEventListener("input", () => {
+    libState.q = $q.value;
+    if (location.hash.replace(/^#\/?/, "")) location.hash = "#/";
+    else viewHome();
+  });
+  document.getElementById("heroSearch").addEventListener("submit", (e) => {
+    e.preventDefault();
+    document.querySelector(".section-title")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  document.getElementById("catbar").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-cat]");
+    if (!b) return;
+    if (!b.dataset.cat) { location.hash = "#/the-loai"; return; }            // "Khác": xem mọi thể loại
+    libState.cat = libState.cat === b.dataset.cat ? "" : b.dataset.cat;      // bấm lần nữa để bỏ lọc
+    libState.tag = "";
+    document.querySelectorAll("[data-cat]").forEach((x) => x.classList.toggle("active", !!x.dataset.cat && x.dataset.cat === libState.cat));
+    viewHome();
+  });
 
   // ---------- cài như ứng dụng (PWA) ----------
   if ("serviceWorker" in navigator && location.protocol !== "file:") {

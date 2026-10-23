@@ -25,9 +25,13 @@
 /* ---------- shell ---------- */
 .admin .topbar { gap: 8px; }
 .tabs { display: flex; gap: 4px; flex: 1; justify-content: center; }
-.admin .topbar .tabs a { padding: 6px 12px; border-radius: 999px; color: var(--muted); font-weight: 500; white-space: nowrap; }
-.admin .topbar .tabs a:hover { color: var(--text); }
-.admin .topbar .tabs a.active { background: var(--accent-fill); color: #fff; }
+.admin .topbar .tabs a { padding: 6px 12px; border-radius: 999px; color: rgba(255, 255, 255, .75); font-weight: 500; white-space: nowrap; border: 0; }
+.admin .topbar .tabs a:hover { color: #fff; }
+.admin .topbar .tabs a.active { background: #fff; color: var(--navy); }
+.admin .brand-icon { width: 34px; height: 34px; }
+@media (max-width: 720px) {
+  .admin .topbar .tabs { order: 3; flex: 0 0 100%; justify-content: flex-start; overflow-x: auto; }
+}
 
 #view { max-width: 960px; margin: 0 auto; padding: 4px 16px 60px; }
 .top-right { display: flex; gap: 6px; }

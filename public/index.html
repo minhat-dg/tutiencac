@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tu Tiên Các</title>
-  <meta name="theme-color" content="#b23a2b">
+  <meta name="theme-color" content="#0D2B4F">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" type="image/png" href="/icons/favicon-64.png">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
@@ -15,16 +15,96 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="topbar">
-    <a href="#/" class="brand">☯<span class="brand-text"> Tu Tiên Các</span></a>
-    <nav>
-      <a href="#/" data-nav="home">Thư viện</a>
-      <a href="#/shelf" data-nav="shelf">Tủ sách</a>
-      <a href="#/account" data-nav="account" id="accountLink" hidden>Đăng nhập</a>
-      <button class="btn small" id="installBtn" hidden title="Cài ứng dụng lên máy">Cài app</button>
-      <button class="ibtn music-btn" data-music title="Nhạc nền">♪</button>
-    </nav>
+  <header class="site-header" id="siteHeader">
+    <!-- phong cảnh: trăng, núi nhiều lớp, lầu các, sương -->
+    <svg class="hero-art" viewBox="0 0 1200 320" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+      <defs>
+        <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#0D2B4F"/><stop offset=".65" stop-color="#244E7E"/><stop offset="1" stop-color="#5C8CC0"/>
+        </linearGradient>
+        <radialGradient id="glow" cx=".5" cy=".5" r=".5">
+          <stop offset="0" stop-color="#F7D37A" stop-opacity=".55"/><stop offset="1" stop-color="#F7D37A" stop-opacity="0"/>
+        </radialGradient>
+        <linearGradient id="mist" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#AFC8E8" stop-opacity="0"/><stop offset="1" stop-color="#AFC8E8" stop-opacity=".55"/>
+        </linearGradient>
+        <symbol id="pagoda" viewBox="0 0 60 92">
+          <path d="M30 0l3 12h-6z"/>
+          <path d="M6 24q24-12 48 0l-6 3H12z"/><rect x="17" y="27" width="26" height="10"/>
+          <path d="M2 46q28-14 56 0l-7 3H9z"/><rect x="15" y="49" width="30" height="11"/>
+          <path d="M-2 70q32-16 64 0l-8 3H6z"/><rect x="12" y="73" width="36" height="19"/>
+        </symbol>
+      </defs>
+      <rect width="1200" height="320" fill="url(#sky)"/>
+      <circle cx="930" cy="96" r="120" fill="url(#glow)"/>
+      <circle cx="930" cy="96" r="54" fill="#F7D37A" opacity=".92"/>
+      <!-- núi xa -->
+      <path fill="#5D86B6" opacity=".55" d="M0 230 L80 170 L140 200 L230 120 L300 190 L380 150 L460 200 L560 110 L640 190 L720 150 L800 200 L900 130 L980 190 L1060 150 L1130 190 L1200 160 V320 H0Z"/>
+      <!-- núi giữa có lầu các -->
+      <path fill="#2F5B8E" opacity=".85" d="M0 260 L70 220 L150 250 L240 180 L320 240 L400 205 L480 250 L590 170 L680 245 L760 210 L850 255 L950 190 L1040 250 L1120 215 L1200 245 V320 H0Z"/>
+      <use href="#pagoda" x="568" y="118" width="44" height="66" fill="#1E4572"/>
+      <use href="#pagoda" x="935" y="140" width="32" height="50" fill="#1E4572"/>
+      <use href="#pagoda" x="225" y="140" width="30" height="46" fill="#1E4572"/>
+      <!-- sương -->
+      <rect y="215" width="1200" height="70" fill="url(#mist)"/>
+      <!-- núi gần -->
+      <path fill="#0D2B4F" d="M0 300 L90 255 L170 285 L260 240 L360 290 L450 262 L560 296 L660 250 L760 292 L860 260 L960 298 L1060 258 L1140 288 L1200 270 V320 H0Z"/>
+      <use href="#pagoda" x="650" y="196" width="40" height="60" fill="#0A2240"/>
+    </svg>
+
+    <div class="topbar">
+      <a href="#/" class="brand" aria-label="Trang chủ">
+        <img class="brand-icon" src="/icons/icon-192.png" alt="">
+        <img class="brand-word" src="/brand/wordmark.png" alt="Tu Tiên Các">
+        <span class="brand-text" hidden></span>
+      </a>
+      <nav>
+        <a href="#/" data-nav="home">Trang chủ</a>
+        <a href="#/the-loai" data-nav="the-loai">Thể loại</a>
+        <a href="#/moi" data-nav="moi">Truyện mới</a>
+        <a href="#/shelf" data-nav="shelf">Tủ sách</a>
+        <a href="#/account" data-nav="account" id="accountLink" hidden>Đăng nhập</a>
+        <button class="btn small" id="installBtn" hidden title="Cài ứng dụng lên máy">Cài app</button>
+        <button class="ibtn music-btn" data-music title="Nhạc nền">♪</button>
+      </nav>
+    </div>
+
+    <div class="hero">
+      <p class="tagline">Kho truyện tu tiên hay nhất, cập nhật liên tục.</p>
+      <form class="hero-search" id="heroSearch" role="search">
+        <input type="search" id="q" placeholder="Tìm kiếm truyện, tác giả…" aria-label="Tìm kiếm truyện" autocomplete="off">
+        <button type="submit" aria-label="Tìm">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+        </button>
+      </form>
+    </div>
   </header>
+
+  <!-- thể loại nhanh -->
+  <nav class="catbar" id="catbar" aria-label="Thể loại">
+    <div class="catbar-inner">
+      <button class="cat" data-cat="tiên hiệp">
+        <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M16 6c3 4 3 10 0 15-3-5-3-11 0-15z"/><path d="M16 21c-2-5-6-8-10-8 0 5 4 8 10 8zM16 21c2-5 6-8 10-8 0 5-4 8-10 8z"/><path d="M5 25h22"/></svg>
+        <span>Tiên hiệp</span>
+      </button>
+      <button class="cat" data-cat="huyền huyễn">
+        <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="16" cy="16" r="11"/><path d="M16 5a5.5 5.5 0 0 1 0 11 5.5 5.5 0 0 0 0 11" /><circle cx="16" cy="10.5" r="1.6" fill="currentColor"/><circle cx="16" cy="21.5" r="1.6"/></svg>
+        <span>Huyền huyễn</span>
+      </button>
+      <button class="cat" data-cat="kiếm hiệp">
+        <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M25 4l3 0 0 3-13 13-3-3z"/><path d="M10 16l6 6M8 24l4-4M6 22l4 4"/></svg>
+        <span>Kiếm hiệp</span>
+      </button>
+      <button class="cat" data-cat="đồng nhân">
+        <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4 8c4-2 8-2 12 1 4-3 8-3 12-1v17c-4-2-8-2-12 1-4-3-8-3-12-1z"/><path d="M16 9v17"/></svg>
+        <span>Đồng nhân</span>
+      </button>
+      <button class="cat" data-cat="">
+        <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="6" y="6" width="8" height="8" rx="2"/><rect x="18" y="6" width="8" height="8" rx="2"/><rect x="6" y="18" width="8" height="8" rx="2"/><rect x="18" y="18" width="8" height="8" rx="2"/></svg>
+        <span>Khác</span>
+      </button>
+    </div>
+  </nav>
 
   <main id="app"><div class="loading">Đang tải thư viện…</div></main>
 

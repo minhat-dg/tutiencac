@@ -1,13 +1,13 @@
 // Service worker: lưu khung ứng dụng để mở được khi không có mạng.
 // Nội dung chương do trang đọc tự lưu trong IndexedDB, nên ở đây không lưu gói chương hay EPUB.
 // Đổi VERSION khi thay danh sách CORE.
-const VERSION = "v4";
+const VERSION = "v5";
 const SHELL = `shell-${VERSION}`;
 const RUNTIME = "runtime-v1";
 const CORE = [
   "/", "/style.css", "/config.js", "/manifest.webmanifest",
   "/js/app.js", "/js/music.js", "/js/tts.js", "/js/cloud.js", "/js/epub.js", "/js/demo-data.js",
-  "/icons/icon-192.png", "/icons/favicon-64.png",
+  "/icons/icon-192.png", "/icons/favicon-64.png", "/brand/wordmark.png",
 ];
 
 self.addEventListener("install", (e) => {
@@ -70,6 +70,6 @@ self.addEventListener("fetch", (e) => {
   if (url.origin === location.origin) {
     if (req.mode === "navigate") return e.respondWith(staleWhileRevalidate(req, SHELL, "/"));
     // chỉ lưu các file của ứng dụng, không lưu file lớn khác cùng trang
-    if (/\.(js|css|png|webmanifest)$/.test(url.pathname)) return e.respondWith(staleWhileRevalidate(req, SHELL));
+    if (/\.(js|css|png|webmanifest)$/.test(url.pathname) && !url.pathname.startsWith("/_")) return e.respondWith(staleWhileRevalidate(req, SHELL));
   }
 });
