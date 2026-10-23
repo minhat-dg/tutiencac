@@ -11,7 +11,7 @@ window.TT_CONFIG = {
   // Tài khoản người đọc + trang quản trị qua Supabase (tuỳ chọn, để trống = tắt).
   // Lấy ở Supabase → Project Settings → API: "Project URL" và khoá "anon public".
   // Khoá anon là khoá công khai, đưa lên web được. KHÔNG điền khoá service_role ở đây.
-  supabaseUrl: "",
-  supabaseAnonKey: "",
+  supabaseUrl: "https://fmflnuynfpnmvdvnxuqy.supabase.co",
+  supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZtZmxudXluZnBubXZkdm54dXF5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI3MDAwOTksImV4cCI6MjEwODI3NjA5OX0.zxFgh-py0RrPbGiidpP1OLOwsCe8dTEQj61IlxtmzNw",
   googleLogin: false, // true sau khi bật Google trong Supabase → Authentication → Providers
 };
