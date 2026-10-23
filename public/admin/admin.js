@@ -346,8 +346,8 @@
         <div class="stats"><span>${cat.novels.length} truyện</span><span>${totalCh.toLocaleString("vi-VN")} chương</span><span>${cat.novels.filter((n) => n.hidden).length} đang ẩn</span></div>
       </div>
       <label class="drop" id="drop">
-        <input type="file" id="epubInput" accept=".epub,application/epub+zip" hidden>
-        <b>＋ Thêm truyện: kéo thả file EPUB vào đây</b>
+        <input type="file" id="epubInput" accept="${BOOK_ACCEPT}" hidden>
+        <b>＋ Thêm truyện: kéo thả file EPUB hoặc PRC/MOBI vào đây</b>
         <span class="hint">hoặc bấm để chọn file. Thông tin, ảnh bìa và số chương được đọc tự động.</span>
       </label>
       ${cat.novels.length > 5 ? `<div class="head-row"><input class="search" id="search" type="search" placeholder="Tìm truyện…" value="${esc(query)}"></div>` : ""}
@@ -371,7 +371,7 @@
               <button class="ibtn" data-act="edit">Sửa</button>
               <button class="ibtn danger" data-act="del">Xoá</button>
             </div>
-          </div>`).join("") || `<div class="empty">${cat.novels.length ? "Không tìm thấy." : "Chưa có truyện nào. Thêm file EPUB đầu tiên ở ô phía trên."}</div>`}
+          </div>`).join("") || `<div class="empty">${cat.novels.length ? "Không tìm thấy." : "Chưa có truyện nào. Thêm file EPUB hoặc PRC/MOBI đầu tiên ở ô phía trên."}</div>`}
       </div>`;
 
     const input = $("epubInput"), drop = $("drop");
@@ -384,8 +384,8 @@
       if (!files.length) {
         return toast("Không nhận được file. Hãy kéo file từ thư mục trên máy (không kéo từ trong file nén hay thanh tải xuống của trình duyệt), hoặc bấm vào ô để chọn file.");
       }
-      for (const f of files) if (await isEpub(f)) return addEpub(f);
-      toast(`"${files[0].name}" không phải file EPUB.`);
+      for (const f of files) if (await bookKind(f)) return addEpub(f);
+      toast(`"${files[0].name}" không phải file EPUB hay PRC/MOBI.`);
     };
     const s = $("search");
     if (s) s.oninput = () => { query = s.value; const pos = s.selectionStart; viewNovels(); const t = $("search"); t.focus(); t.setSelectionRange(pos, pos); };
@@ -430,18 +430,27 @@
     return new Promise((res) => c.toBlob(res, "image/jpeg", 0.85));
   }
 
-  // EPUB = zip whose first entry is "mimetype" containing "application/epub+zip", so the
-  // content identifies it even when the file name lost its extension.
-  async function isEpub(file) {
-    if (/\.epub\s*$/i.test(file.name) || file.type === "application/epub+zip") return true;
+  // Nhận diện theo nội dung để vẫn nhận khi tên file mất đuôi:
+  //   EPUB = zip có mục "mimetype" ghi "application/epub+zip"
+  //   PRC/MOBI/AZW3 = cơ sở dữ liệu Palm kiểu "BOOKMOBI" (hoặc "TEXtREAd")
+  const BOOK_ACCEPT = ".epub,application/epub+zip,.prc,.mobi,.azw,.azw3,application/x-mobipocket-ebook";
+  async function bookKind(file) {
     try {
-      const head = new TextDecoder().decode(await file.slice(0, 80).arrayBuffer());
-      return head.startsWith("PK") && head.includes("application/epub+zip");
-    } catch { return false; }
+      const head = new Uint8Array(await file.slice(0, 80).arrayBuffer());
+      if (window.Mobi.isMobi(head)) return "mobi";
+      const text = new TextDecoder().decode(head);
+      if (text.startsWith("PK") && text.includes("application/epub+zip")) return "epub";
+    } catch { /* đọc không được thì dựa vào tên */ }
+    if (/\.epub\s*$/i.test(file.name) || file.type === "application/epub+zip") return "epub";
+    if (/\.(prc|mobi|azw3?)\s*$/i.test(file.name)) return "mobi";
+    return null;
   }
 
-  async function readEpub(file) {
-    const parsed = await busy(`Đang đọc ${file.name}…`, () => window.Epub.parse(file));
+  async function readBook(file) {
+    const kind = await bookKind(file);
+    if (!kind) { toast(`"${file.name}" không phải file EPUB hay PRC/MOBI`); throw new Error("kind"); }
+    const parser = kind === "mobi" ? window.Mobi : window.Epub;
+    const parsed = await busy(`Đang đọc ${file.name}…`, () => parser.parse(file));
     let cover = null;
     if (parsed.cover) { try { cover = await toJpeg(parsed.cover); } catch {} }
     return { parsed, cover };
@@ -449,11 +458,11 @@
 
   async function addEpub(file) {
     let r;
-    try { r = await readEpub(file); } catch { return; }
+    try { r = await readBook(file); } catch { return; }
     const p = r.parsed;
     openEditor(null, {
       file, cover: r.cover, chapters: p.chapters,
-      fields: { title: p.title || file.name.replace(/\.epub$/i, ""), author: p.author, tags: p.tags.slice(0, 5), status: "", description: p.description.slice(0, 3000) },
+      fields: { title: p.title || file.name.replace(/\.(epub|prc|mobi|azw3?)$/i, ""), author: p.author, tags: p.tags.slice(0, 5), status: "", description: p.description.slice(0, 3000) },
     });
   }
 
@@ -477,7 +486,7 @@
               ${coverSrc ? `<img src="${esc(coverSrc)}" alt="">` : `<div class="ph">Chưa có ảnh bìa</div>`}
               <div style="display:grid;gap:6px">
                 <label class="btn ghost small filebtn">Đổi ảnh bìa<input type="file" id="edCover" accept="image/*"></label>
-                <label class="btn ghost small filebtn">${orig ? "Thay file EPUB" : "Chọn EPUB khác"}<input type="file" id="edEpub" accept=".epub,application/epub+zip"></label>
+                <label class="btn ghost small filebtn">${orig ? "Thay file truyện" : "Chọn file khác"}<input type="file" id="edEpub" accept="${BOOK_ACCEPT}"></label>
               </div>
             </div>
             <div class="form-grid">
@@ -527,7 +536,7 @@
             if (!r.ok) throw new Error(`Không tải được ${orig.file} (${r.status})`);
             return r.blob();
           });
-          const r = await readEpub(new File([blob], orig.file.replace(/^.*\//, "")));
+          const r = await readBook(new File([blob], orig.file.replace(/^.*\//, "")));
           state.chapters = r.parsed.chapters;
           if (r.cover && !orig.cover && !state.cover) state.cover = r.cover;
           draw();
@@ -539,7 +548,7 @@
         if (!file) return;
         snapshot();
         try {
-          const r = await readEpub(file);
+          const r = await readBook(file);
           state.epub = file; state.chapters = r.parsed.chapters;
           if (r.cover && !state.cover) state.cover = r.cover;
           draw();

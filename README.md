@@ -15,7 +15,8 @@ Admin     ──▶ Vercel (/admin)  ──ghi──▶ Bunny Storage API ──
 ## Trang quản trị `/admin`
 
 - **Truyện**:
-  - Kéo thả file EPUB vào, web tự đọc tên, tác giả, giới thiệu, thể loại, ảnh bìa và danh sách chương.
+  - Kéo thả file **EPUB** hoặc **PRC / MOBI / AZW3** (định dạng Kindle cũ) vào, web tự đọc tên, tác giả, giới thiệu, thể loại, ảnh bìa và danh sách chương.
+  - File PRC/MOBI có khoá DRM, hoặc nén kiểu HUFF/CDIC, thì không đọc được. Mở bằng [Calibre](https://calibre-ebook.com), chuyển sang EPUB rồi đăng.
   - Sửa thông tin rồi bấm **Đăng truyện**.
   - Sửa, ẩn/hiện (lưu nháp), sắp xếp thứ tự, thay EPUB, đổi ảnh bìa, xoá truyện (xoá luôn file trên Bunny).
 - **Nhạc nền**: tải mp3/ogg/m4a lên, đổi tên, nghe thử, xoá.
