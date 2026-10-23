@@ -39,7 +39,7 @@ Mỗi lần thay EPUB hoặc ảnh bìa, nội dung mới được lưu ở thư
 ## Cấu trúc trên Bunny Storage
 
 ```
-/catalog.json                     danh sách truyện, nhạc và thông tin trang
+/catalog.json                     danh sách truyện, nhạc, thông tin trang (chỉ khi KHÔNG dùng Supabase)
 /novels/<id>/<phiên bản>/toc.json danh sách tên chương
 /novels/<id>/<phiên bản>/c<k>.json gói 50 chương (c0 = chương 1–50, c1 = 51–100…)
 /bia/*.jpg                        ảnh bìa (thu nhỏ còn 600px)
@@ -77,8 +77,14 @@ Khi đăng truyện, trang quản trị đọc EPUB rồi chia thành các gói 
 ## Supabase: tài khoản người đọc + đăng nhập quản trị an toàn (tuỳ chọn)
 
 Khi bật:
+- **Danh sách truyện, nhạc nền, tên trang, thông báo** nằm trong database (bảng `novels`, `music`, `site_settings`) thay cho `catalog.json`.
+  - Admin thêm, sửa, ẩn hay xoá truyện thì người đọc thấy **ngay**, không bị CDN giữ bản cũ.
+  - Trang đọc lưu lại danh sách lần tải gần nhất, nên vẫn mở được khi mất mạng hoặc khi Supabase đang tạm dừng.
+- **Nội dung chương, ảnh bìa, file nhạc** vẫn nằm trên Bunny CDN. Mỗi lần đăng là một đường dẫn mới nên không bao giờ lẫn bản cũ.
 - **Người đọc** đăng nhập để tiến độ đọc và tủ sách tự đồng bộ giữa các máy. Không đăng nhập vẫn đọc bình thường.
 - **Admin** đăng nhập bằng tài khoản. Việc ghi lên Bunny đi qua Edge Function `bunny`, nên mật khẩu Storage chỉ nằm trên server Supabase.
+
+Nếu đã chạy `schema.sql` bản cũ, hãy **chạy lại bản mới**. Lệnh chạy lại được nhiều lần và không làm mất dữ liệu. Trước đây đã có truyện trong `catalog.json` thì vào **/admin → Cài đặt** và bấm **Chuyển sang database**.
 
 Các bước (làm trên dashboard Supabase, không cần cài gì):
 
@@ -114,7 +120,7 @@ Lưu ý:
   - Hoặc tắt *Confirm email* trong *Authentication → Providers → Email*.
 - **Đăng nhập Google**: bật trong *Authentication → Providers → Google*, rồi đặt `googleLogin: true` trong `config.js`.
 - **Gói miễn phí**: project bị tạm dừng nếu không có ai dùng trong 1 tuần. Vào dashboard bấm *Restore* là chạy lại. Trong lúc tạm dừng, trang đọc vẫn đọc được bình thường, chỉ không đồng bộ được.
-- **Đăng nhập dự phòng**: màn hình đăng nhập `/admin` vẫn có lựa chọn dùng mật khẩu Storage, phòng khi Supabase gặp sự cố.
+- **Không còn đăng nhập dự phòng bằng mật khẩu Storage** khi đã bật Supabase. Danh sách truyện giờ nằm trong database, nên chỉ tài khoản admin trên Supabase sửa được.
 
 Chạy thử trên máy: `serve.ps1 -Mock` có giả lập cả Edge Function ở `/_mock/sb/functions/v1/bunny`. Token `tok-admin` là admin, `tok-user` là người dùng thường.
 

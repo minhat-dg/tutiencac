@@ -9,6 +9,13 @@ window.Cloud = (() => {
   const enabled = !!(URL_ && KEY);
   const SDK = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js";
 
+  // Cột của bảng novels (giống các trường truyện trước đây trong catalog.json).
+  const NOVEL_COLS = ["id", "title", "author", "tags", "status", "description", "cover", "dir", "file", "chunk", "chapters", "words", "hidden", "updated"];
+  const DEFAULTS = { tags: [], chunk: 50, chapters: 0, words: 0, hidden: false };
+  // Bỏ trường rỗng và cột nội bộ để dữ liệu giống hệt dạng cũ.
+  const tidy = (o) => Object.fromEntries(Object.entries(o).filter(([k, v]) =>
+    v !== null && v !== "" && k !== "position" && k !== "updated_at" && !(Array.isArray(v) && !v.length)));
+
   let client = null;
   let session = null;
   const listeners = new Set();
@@ -92,6 +99,59 @@ window.Cloud = (() => {
       if (error) fail(error);
     },
     async signOut() { if (client) await client.auth.signOut(); },
+
+    // ---------- thư viện (thay cho catalog.json) ----------
+    // Trang đọc: gọi thẳng REST bằng khoá công khai, không cần tải thư viện Supabase.
+    // Quy tắc RLS tự bỏ các truyện đang ẩn.
+    async library() {
+      const h = { apikey: KEY, Authorization: `Bearer ${KEY}` };
+      const get = async (q) => {
+        const r = await fetch(`${URL_}/rest/v1/${q}`, { headers: h, cache: "no-store" });
+        if (!r.ok) throw new Error(`Không tải được danh sách truyện (${r.status})`);
+        return r.json();
+      };
+      const [novels, music, site] = await Promise.all([
+        get("novels?select=*&order=position.asc"),
+        get("music?select=file,title&order=position.asc"),
+        get("site_settings?select=name,notice&id=eq.1"),
+      ]);
+      return { site: tidy(site[0] || {}), novels: novels.map(tidy), music };
+    },
+
+    // Trang quản trị: đọc tất cả (kể cả truyện ẩn) bằng phiên đăng nhập admin.
+    async adminLibrary() {
+      need();
+      const [n, m, s] = await Promise.all([
+        client.from("novels").select("*").order("position"),
+        client.from("music").select("file,title").order("position"),
+        client.from("site_settings").select("name,notice").eq("id", 1).maybeSingle(),
+      ]);
+      for (const r of [n, m, s]) if (r.error) fail(r.error);
+      return { site: tidy(s.data || {}), novels: n.data.map(tidy), music: m.data };
+    },
+
+    // Ghi những gì khác nhau giữa trước và sau khi sửa: dòng mới/đổi thì upsert, dòng mất thì xoá.
+    async saveLibrary(before, after) {
+      need();
+      const novelRow = (x, i) => ({ ...Object.fromEntries(NOVEL_COLS.map((k) => [k, x[k] ?? DEFAULTS[k] ?? null])), position: i });
+      const musicRow = (x, i) => ({ file: x.file, title: x.title || "", position: i });
+      const plan = (rowOf, key, oldList, newList) => {
+        const old = new Map(oldList.map((x, i) => [x[key], JSON.stringify(rowOf(x, i))]));
+        const rows = newList.map(rowOf).filter((r) => old.get(r[key]) !== JSON.stringify(r));
+        const keep = new Set(newList.map((x) => x[key]));
+        return { rows, gone: oldList.map((x) => x[key]).filter((k) => !keep.has(k)) };
+      };
+      const ops = [];
+      const n = plan(novelRow, "id", before.novels, after.novels);
+      if (n.gone.length) ops.push(client.from("novels").delete().in("id", n.gone));
+      if (n.rows.length) ops.push(client.from("novels").upsert(n.rows));
+      const m = plan(musicRow, "file", before.music, after.music);
+      if (m.gone.length) ops.push(client.from("music").delete().in("file", m.gone));
+      if (m.rows.length) ops.push(client.from("music").upsert(m.rows));
+      const site = { id: 1, name: after.site.name || null, notice: after.site.notice || null };
+      if (JSON.stringify(tidy(before.site)) !== JSON.stringify(tidy(after.site))) ops.push(client.from("site_settings").upsert(site));
+      for (const r of await Promise.all(ops)) if (r.error) fail(r.error);
+    },
 
     // ---------- đồng bộ dữ liệu đọc ----------
     async load() {

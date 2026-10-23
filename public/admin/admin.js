@@ -185,11 +185,10 @@
   }
   let regionNotice = "";
 
-  let storageFallback = false; // người dùng chọn đăng nhập dự phòng bằng mật khẩu Storage
   function showLogin(msg) {
     $("shell").hidden = true;
     $("login").hidden = false;
-    const cloudUi = Cloud.enabled && !storageFallback;
+    const cloudUi = Cloud.enabled;
     $("cloudForm").hidden = !cloudUi;
     $("loginForm").hidden = cloudUi;
     $(cloudUi ? "cloudError" : "loginError").textContent = msg || "";
@@ -257,7 +256,9 @@
       btn.disabled = false; btn.textContent = "Đăng nhập";
     }
   });
-  $("useStorage").onclick = (e) => { e.preventDefault(); storageFallback = true; showLogin(); };
+  // Danh sách truyện đã nằm trong database nên không còn đăng nhập dự phòng bằng mật khẩu Storage
+  // (cách đó chỉ sửa được catalog.json, trang đọc không dùng nữa).
+  $("useStorage").hidden = true;
 
   async function logout() {
     store.del("admin-key");
@@ -278,14 +279,25 @@
     c = Array.isArray(c) ? { novels: c } : c || {};
     return { site: c.site || {}, novels: (c.novels || []).filter((n) => n && (n.file || n.dir)), music: (c.music || []).filter((m) => m && m.file) };
   }
-  async function reload() { cat = normalizeCat(await Bunny.getJSON("catalog.json")); }
+  // Có Supabase: danh sách truyện / nhạc / thông tin trang nằm trong database.
+  // Chưa có: nằm trong catalog.json trên Bunny như trước.
+  const useDb = () => Cloud.enabled && mode === "cloud";
+  async function loadCat() {
+    return normalizeCat(useDb() ? await Cloud.adminLibrary() : await Bunny.getJSON("catalog.json"));
+  }
+  async function reload() { cat = await loadCat(); }
 
-  // Always edit the latest catalog on Bunny so nothing written elsewhere is lost.
+  // Luôn sửa trên bản mới nhất để không làm mất thay đổi từ máy khác.
   async function mutate(fn) {
-    const fresh = normalizeCat(await Bunny.getJSON("catalog.json"));
+    const fresh = await loadCat();
+    const before = JSON.parse(JSON.stringify(fresh));
     fn(fresh);
-    fresh.generated = new Date().toISOString();
-    await Bunny.put("catalog.json", JSON.stringify(fresh, null, 2));
+    fresh.novels.forEach((n) => { n.id = entryId(n); });
+    if (useDb()) await Cloud.saveLibrary(before, fresh);
+    else {
+      fresh.generated = new Date().toISOString();
+      await Bunny.put("catalog.json", JSON.stringify(fresh, null, 2));
+    }
     cat = fresh;
     render();
   }
@@ -675,6 +687,33 @@
     }).then(() => toast(`Đã thêm ${added.length} bài nhạc`), () => {});
   }
 
+  // Khi đã dùng database: chuyển dữ liệu từ catalog.json (nếu database còn trống) và dọn file cũ.
+  async function showOldFiles(sealed) {
+    const box = $("oldFiles");
+    if (!box) return;
+    const old = normalizeCat(await Bunny.getJSON("catalog.json").catch(() => null));
+    const hasOldCatalog = old.novels.length || old.music.length || Object.keys(old.site).length;
+    const catalogExists = hasOldCatalog || (await Bunny.getJSON("catalog.json").catch(() => null)) !== null;
+    const canImport = hasOldCatalog && !cat.novels.length && !cat.music.length;
+    const parts = [];
+    if (canImport) {
+      parts.push(`<p class="hint">File <code>catalog.json</code> cũ có ${old.novels.length} truyện, ${old.music.length} bài nhạc chưa có trong database.
+        <button class="btn small" type="button" id="importOld">Chuyển sang database</button></p>`);
+    }
+    const leftovers = [catalogExists && !canImport ? "catalog.json" : "", sealed ? "_admin/key.json" : ""].filter(Boolean);
+    if (leftovers.length) {
+      parts.push(`<p class="hint">Còn file cũ không dùng nữa: ${leftovers.map((f) => `<code>${f}</code>`).join(", ")}.
+        <button class="btn ghost small" type="button" id="delOld">Xoá</button></p>`);
+    }
+    box.innerHTML = parts.join("");
+    const imp = $("importOld");
+    if (imp) imp.onclick = () => busy("Đang chuyển…", () => mutate((c) => { c.novels = old.novels; c.music = old.music; c.site = old.site; }))
+      .then(() => { toast("Đã chuyển sang database"); viewSettings(); }, () => {});
+    const del = $("delOld");
+    if (del) del.onclick = () => busy("Đang xoá…", async () => { for (const f of leftovers) await Bunny.del(f); })
+      .then(() => { toast("Đã xoá file cũ"); viewSettings(); }, () => {});
+  }
+
   // ---------- cài đặt ----------
   async function viewSettings() {
     const site = cat.site || {};
@@ -695,8 +734,7 @@
         <p class="hint">Đang đăng nhập bằng tài khoản <b>${esc(Cloud.user ? Cloud.user.email : "")}</b> qua Supabase.
           Mật khẩu Storage nằm trong Secrets của Edge Function, trình duyệt không giữ.
           Muốn thêm người quản trị: cho họ đăng ký ở trang đọc, rồi thêm email vào bảng <code>admins</code> (xem README).</p>
-        <p class="hint" id="oldKey" hidden>Vẫn còn file <code>_admin/key.json</code> của cách đăng nhập cũ. Không cần nữa, nên xoá.
-          <button class="btn ghost small" type="button" id="oldKeyDel">Xoá file này</button></p>
+        <div id="oldFiles"></div>
       </section>` : `
       <section class="box settings-box">
         <h3>Mật khẩu quản trị</h3>
@@ -717,7 +755,8 @@
         <dl class="kv">
           <dt>Storage Zone</dt><dd>${esc(conn.zone)}</dd>
           <dt>Máy chủ Storage</dt><dd>${esc(conn.host)}</dd>
-          <dt>Pull Zone (CDN)</dt><dd>${conn.cdn ? `<a class="link" href="${esc(conn.cdn)}/catalog.json" target="_blank" rel="noopener">${esc(conn.cdn)}</a>` : "<b>Chưa cấu hình</b> — trang đọc sẽ chạy chế độ demo"}</dd>
+          <dt>Pull Zone (CDN)</dt><dd>${conn.cdn ? esc(conn.cdn) : "<b>Chưa cấu hình</b> — trang đọc sẽ chạy chế độ demo"}</dd>
+          <dt>Danh sách truyện</dt><dd>${useDb() ? "Database Supabase (bảng novels, music, site_settings)" : "File catalog.json trên Bunny"}</dd>
           <dt>Trang đọc</dt><dd id="cdnCheck">Đang kiểm tra…</dd>
         </dl>
         <p class="hint">Muốn đổi: sửa <code>config.js</code> rồi deploy lại, hoặc đổi tạm trên máy này ở mục “Kết nối Bunny” của màn hình đăng nhập.</p>
@@ -730,15 +769,12 @@
       const fd = new FormData(e.target);
       const s = { name: String(fd.get("name")).trim(), notice: String(fd.get("notice")).trim() };
       busy("Đang lưu…", () => mutate((c) => { c.site = Object.fromEntries(Object.entries(s).filter(([, v]) => v)); }))
-        .then(() => toast("Đã lưu. Trang đọc cập nhật sau khoảng 1 phút."), () => {});
+        .then(() => toast(useDb() ? "Đã lưu, trang đọc cập nhật ngay." : "Đã lưu. Trang đọc cập nhật sau khoảng 1 phút."), () => {});
     };
 
     const sealed = await Bunny.getJSON("_admin/key.json").catch(() => null);
     if (mode === "cloud") {
-      if (sealed && $("oldKey")) {
-        $("oldKey").hidden = false;
-        $("oldKeyDel").onclick = () => busy("Đang xoá…", () => Bunny.del("_admin/key.json")).then(() => { toast("Đã xoá"); viewSettings(); }, () => {});
-      }
+      await showOldFiles(sealed);
     } else if ($("pwStatus")) {
       $("pwStatus").innerHTML = sealed ? `<span class="ok">✓ Đã đặt mật khẩu quản trị.</span> Đặt lại bên dưới nếu muốn đổi.` : "Chưa đặt. Hiện chỉ đăng nhập được bằng mật khẩu Storage.";
       $("pwRemove").hidden = !sealed;
@@ -757,8 +793,17 @@
       await busy("Đang xoá…", () => Bunny.del("_admin/key.json")).then(() => { toast("Đã xoá"); viewSettings(); }, () => {});
     };
 
-    // Check that the reader can reach catalog.json through the CDN (CORS).
     const out = $("cdnCheck");
+    if (useDb()) {
+      try {
+        const lib = await Cloud.library(); // đúng như người đọc thấy (không đăng nhập)
+        out.innerHTML = `<span class="ok">✓ Lấy danh sách từ Supabase: ${lib.novels.length} truyện đang hiện</span>`;
+      } catch (err) {
+        out.innerHTML = `<b>Trang đọc không lấy được danh sách:</b> ${esc(err.message)}. Kiểm tra đã chạy lại supabase/schema.sql chưa.`;
+      }
+      return;
+    }
+    // Check that the reader can reach catalog.json through the CDN (CORS).
     if (!conn.cdn) { out.textContent = "—"; return; }
     try {
       const r = await fetch(cdnUrl("catalog.json") + "?v=" + Date.now(), { cache: "no-store" });
@@ -784,7 +829,8 @@
 
   (async () => {
     await Cloud.ready;
-    if (Cloud.enabled && Cloud.user) {
+    if (Cloud.enabled) {
+      if (!Cloud.user) return showLogin();
       try { return await enterCloud(); } catch (err) { return showLogin(err.message); }
     }
     const saved = store.get("admin-key", sessionStorage) || store.get("admin-key");

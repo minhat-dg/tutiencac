@@ -196,7 +196,26 @@
       }));
       return [];
     }
-    // catalog.json là file duy nhất thay đổi thường xuyên: chặn cache bằng query theo phút.
+    if (window.Cloud.enabled) {
+      // Danh sách truyện nằm trong database Supabase: lần nào cũng là bản mới nhất.
+      // Lưu lại bản gần nhất để vẫn mở được khi mất mạng hoặc Supabase đang tạm dừng.
+      let lib;
+      try {
+        lib = await window.Cloud.library();
+        LS.set("library-cache", lib);
+        libraryStale = false;
+      } catch (err) {
+        lib = LS.get("library-cache", null);
+        if (!lib) throw err;
+        libraryStale = true;
+      }
+      applySite(lib.site || {});
+      const seen = new Set();
+      novels = (lib.novels || []).filter((e) => e && (e.file || e.dir) && !e.hidden).map(normalize)
+        .filter((n) => !seen.has(n.id) && seen.add(n.id));
+      return lib.music || [];
+    }
+    // Chưa dùng Supabase: đọc catalog.json trên CDN, chặn cache bằng query theo phút.
     const r = await fetch(cdnUrl("catalog.json") + "?v=" + Math.floor(Date.now() / 60000), { cache: "no-cache" });
     if (!r.ok) throw new Error(`Không tải được catalog.json (${r.status})`);
     const cat = await r.json();
@@ -208,6 +227,7 @@
     return Array.isArray(cat) ? [] : cat.music || [];
   }
   const findNovel = (id) => novels.find((n) => n.id === id);
+  let libraryStale = false; // đang dùng danh sách đã lưu vì không tải được bản mới
 
   // Tên trang và thông báo do admin đặt trong catalog.json
   let site = {};
@@ -403,6 +423,7 @@
       ${DEMO ? `<div class="notice">Đang chạy chế độ demo với truyện mẫu. Điền <code>cdnBase</code> trong <code>config.js</code> để đọc truyện từ Bunny.</div>` : ""}
       ${site.notice ? `<div class="notice">${esc(site.notice)}</div>` : ""}
       ${navigator.onLine ? "" : `<div class="notice">Bạn đang ngoại tuyến. Vẫn đọc được các chương đã mở hoặc đã tải về máy.</div>`}
+      ${navigator.onLine && libraryStale ? `<div class="notice">Không tải được danh sách truyện mới nhất, đang hiện danh sách đã lưu lần trước.</div>` : ""}
       ${recent.length && !q && !libState.tag ? `<h2 class="section-title">Đọc tiếp</h2><div class="grid">${recent.map(cardHTML).join("")}</div>` : ""}
       <h2 class="section-title">Thư viện</h2>
       <div class="toolbar"><input id="q" type="search" placeholder="Tìm tên truyện, tác giả…" value="${esc(libState.q)}"></div>
@@ -1004,6 +1025,8 @@
     .then(route)
     .catch((err) => {
       console.error(err);
-      $app.innerHTML = `<div class="empty">${esc(err.message)}<br><br>Kiểm tra <code>cdnBase</code> trong config.js và cài đặt CORS của Pull Zone.</div>`;
+      $app.innerHTML = `<div class="empty">${esc(err.message)}<br><br>${window.Cloud.enabled
+        ? "Không kết nối được Supabase. Kiểm tra mạng, hoặc vào dashboard Supabase xem project có đang tạm dừng không."
+        : "Kiểm tra <code>cdnBase</code> trong config.js và cài đặt CORS của Pull Zone."}</div>`;
     });
 })();
