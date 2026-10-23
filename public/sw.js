@@ -1,13 +1,13 @@
 // Service worker: lưu khung ứng dụng để mở được khi không có mạng.
 // Nội dung chương do trang đọc tự lưu trong IndexedDB, nên ở đây không lưu gói chương hay EPUB.
 // Đổi VERSION khi thay danh sách CORE.
-const VERSION = "v5";
+const VERSION = "v6";
 const SHELL = `shell-${VERSION}`;
 const RUNTIME = "runtime-v1";
 const CORE = [
   "/", "/style.css", "/config.js", "/manifest.webmanifest",
   "/js/app.js", "/js/music.js", "/js/tts.js", "/js/cloud.js", "/js/epub.js", "/js/demo-data.js",
-  "/icons/icon-192.png", "/icons/favicon-64.png", "/brand/wordmark.png",
+  "/icons/icon-192.png", "/icons/favicon-32.png", "/icons/favicon-16.png", "/brand/wordmark.png",
 ];
 
 self.addEventListener("install", (e) => {
