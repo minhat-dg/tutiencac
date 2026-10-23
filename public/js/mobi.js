@@ -47,6 +47,59 @@ window.Mobi = (() => {
     return out.subarray(0, o);
   }
 
+  // Giải nén HUFF/CDIC: bản ghi HUFF chứa bảng mã Huffman, các bản ghi CDIC chứa từ điển cụm từ.
+  // Mỗi mã trỏ tới một cụm; cụm chưa giải thì bản thân nó cũng được nén HUFF (giải đệ quy).
+  function huffReader(records) {
+    const huff = records[0];
+    if (!huff || ascii(huff, 0, 4) !== "HUFF") throw new Error("Dữ liệu nén HUFF không hợp lệ");
+    const POW = Array.from({ length: 33 }, (_, i) => 2 ** i);
+    const off1 = u32(huff, 8), off2 = u32(huff, 12);
+    const dict1 = [];
+    for (let i = 0; i < 256; i++) {
+      const v = u32(huff, off1 + i * 4);
+      const len = v & 0x1F;
+      dict1.push([len, v & 0x80, ((v >>> 8) + 1) * POW[32 - len] - 1]);
+    }
+    const mincode = [0], maxcode = [POW[32] - 1];
+    for (let L = 1; L <= 32; L++) {
+      mincode.push(u32(huff, off2 + (L - 1) * 8) * POW[32 - L]);
+      maxcode.push((u32(huff, off2 + (L - 1) * 8 + 4) + 1) * POW[32 - L] - 1);
+    }
+    const dict = [];
+    for (const cdic of records.slice(1)) {
+      if (ascii(cdic, 0, 4) !== "CDIC") break;
+      const n = Math.min(2 ** u32(cdic, 12), u32(cdic, 8) - dict.length);
+      for (let i = 0; i < n; i++) {
+        const off = u16(cdic, 16 + i * 2), blen = u16(cdic, 16 + off);
+        dict.push({ data: cdic.subarray(18 + off, 18 + off + (blen & 0x7FFF)), done: !!(blen & 0x8000) });
+      }
+    }
+
+    function unpack(data) {
+      const word = (p) => ((data[p] << 24) | (data[p + 1] << 16) | (data[p + 2] << 8) | data[p + 3]) >>> 0; // ngoài mảng = 0
+      const out = [];
+      let size = 0, bitsleft = data.length * 8, pos = 0, hi = word(0), lo = word(4), n = 32;
+      for (;;) {
+        if (n <= 0) { pos += 4; hi = lo; lo = word(pos + 4); n += 32; }
+        const code = n >= 32 ? hi : ((hi << (32 - n)) | (lo >>> n)) >>> 0;  // 32 bit kế tiếp
+        let [len, term, max] = dict1[code >>> 24];
+        if (!term) { while (code < mincode[len]) len++; max = maxcode[len]; }
+        n -= len;
+        bitsleft -= len;
+        if (bitsleft < 0) break;
+        const e = dict[Math.floor((max - code) / POW[32 - len])];
+        if (!e) throw new Error("Dữ liệu nén HUFF bị hỏng");
+        if (!e.done) { e.done = true; e.data = unpack(e.data); }
+        out.push(e.data);
+        size += e.data.length;
+      }
+      const res = new Uint8Array(size);
+      for (let i = 0, o = 0; i < out.length; o += out[i].length, i++) res.set(out[i], o);
+      return res;
+    }
+    return unpack;
+  }
+
   // Một số file gắn thêm dữ liệu ở cuối mỗi khối chữ; cần bỏ trước khi giải nén.
   function trailingSize(data, flags) {
     let size = 0;
@@ -92,8 +145,7 @@ window.Mobi = (() => {
     const textRecords = u16(r0, 8);
     const encryption = u16(r0, 12);
     if (encryption) throw new Error("File này có khoá DRM nên không đọc được nội dung. Hãy dùng bản không có DRM.");
-    if (compression === 17480) throw new Error("File dùng kiểu nén HUFF/CDIC. Hãy mở bằng Calibre và chuyển sang EPUB trước khi đăng.");
-    if (compression !== 1 && compression !== 2) throw new Error(`Kiểu nén chưa hỗ trợ (${compression})`);
+    if (compression !== 1 && compression !== 2 && compression !== 17480) throw new Error(`Kiểu nén chưa hỗ trợ (${compression})`);
 
     const hasMobi = r0.length > 20 && ascii(r0, 16, 4) === "MOBI";
     const headerLen = hasMobi ? u32(r0, 20) : 0;
@@ -124,12 +176,18 @@ window.Mobi = (() => {
     }
 
     // ---- chữ: giải nén từng khối, nối lại ----
+    let unhuff = null;
+    if (compression === 17480) {
+      const first = u32(r0, 112), n = u32(r0, 116);
+      if (!hasMobi || !n || first + n > count) throw new Error("File nén HUFF/CDIC nhưng thiếu bảng mã");
+      unhuff = huffReader(Array.from({ length: n }, (_, k) => rec(first + k)));
+    }
     const parts = [];
     let total = 0;
     for (let i = 1; i <= textRecords && i < count; i++) {
       let data = rec(i);
       if (extraFlags) data = data.subarray(0, data.length - trailingSize(data, extraFlags));
-      const out = compression === 2 ? palmdoc(data) : data;
+      const out = compression === 2 ? palmdoc(data) : unhuff ? unhuff(data) : data;
       parts.push(out);
       total += out.length;
     }
