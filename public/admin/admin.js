@@ -560,14 +560,21 @@
   // Chia truyện thành các gói 50 chương để người đọc chỉ tải phần đang đọc:
   //   novels/<id>/<phiên bản>/toc.json   danh sách tên chương
   //   novels/<id>/<phiên bản>/c<k>.json  chương k*50 .. k*50+49
+  // Mỗi gói được nén gzip trước khi gửi (nhẹ hơn ~3–4 lần); trang đọc tự giải nén.
   const CHUNK = 50;
+  const PARALLEL = 6;
+  async function gzip(bytes) {
+    if (!("CompressionStream" in window)) return bytes; // trình duyệt quá cũ: gửi nguyên
+    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
   async function uploadPacks(id, chapters, progress) {
     const dir = `novels/${id}/${stamp()}`;
     const enc = new TextEncoder();
-    const jobs = [{ path: `${dir}/toc.json`, body: enc.encode(JSON.stringify({ v: 1, chunk: CHUNK, count: chapters.length, titles: chapters.map((c) => c.title) })) }];
-    for (let k = 0; k * CHUNK < chapters.length; k++) {
-      jobs.push({ path: `${dir}/c${k}.json`, body: enc.encode(JSON.stringify(chapters.slice(k * CHUNK, (k + 1) * CHUNK))) });
-    }
+    const raw = [{ path: `${dir}/toc.json`, data: { v: 1, chunk: CHUNK, count: chapters.length, titles: chapters.map((c) => c.title) } }];
+    for (let k = 0; k * CHUNK < chapters.length; k++) raw.push({ path: `${dir}/c${k}.json`, data: chapters.slice(k * CHUNK, (k + 1) * CHUNK) });
+    progress("Đang nén nội dung…", 0);
+    const jobs = await Promise.all(raw.map(async (j) => ({ path: j.path, body: await gzip(enc.encode(JSON.stringify(j.data))) })));
     const total = jobs.reduce((s, j) => s + j.body.length, 0);
     const sent = new Map();
     let finished = 0, next = 0;
@@ -587,7 +594,7 @@
         report();
       }
     };
-    try { await Promise.all([1, 2, 3, 4].map(worker)); }
+    try { await Promise.all(Array.from({ length: Math.min(PARALLEL, jobs.length) }, worker)); }
     catch (e) { Bunny.del(asDir(dir)).catch(() => {}); throw e; }
     return { dir, chunk: CHUNK, words: chapters.reduce((s, c) => s + c.content.split(/\s+/).filter(Boolean).length, 0) };
   }

@@ -326,6 +326,16 @@
   // ---------- chapter source: packs on the CDN, a whole EPUB, or the demo data ----------
   const packs = new Map(); // "<dir>/<name>" -> parsed JSON (memory cache)
 
+  // Gói mới được nén gzip (bắt đầu bằng byte 1f 8b); gói cũ là JSON thường.
+  async function readPack(res) {
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+      return JSON.parse(await new Response(stream).text());
+    }
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+
   // Packs live in versioned folders and never change, so a copy on this device is always valid.
   async function getPack(dir, name) {
     const key = `${dir}/${name}`;
@@ -337,7 +347,7 @@
         throw new Error(navigator.onLine ? "Không kết nối được máy chủ truyện." : "Phần này chưa được tải về máy. Hãy kết nối mạng để đọc tiếp.");
       });
       if (!r.ok) throw new Error(`Không tải được dữ liệu truyện (${r.status})`);
-      const data = await r.json();
+      const data = await readPack(r);
       Chunks.put({ key, data, t: Date.now() }).catch(() => {});
       return data;
     })();
