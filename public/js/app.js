@@ -487,6 +487,31 @@
 
   // ---------- reader ----------
   let readerCleanup = null;
+  let ttsAutoStart = false; // chương vừa mở sẽ tự đọc to (đang nghe dở chương trước)
+
+  function syncTts() {
+    const bar = document.getElementById("ttsBar");
+    const s = window.TTS.state;
+    window.Music.duck(s.playing);
+    if (!bar) return;
+    document.getElementById("ttsPlay").textContent = s.playing ? "❚❚" : "▶";
+    document.getElementById("ttsBtn")?.classList.toggle("on", !bar.hidden);
+    document.getElementById("ttsRate").value = String(s.rate);
+    const sel = document.getElementById("ttsVoice");
+    const voices = window.TTS.voices();
+    const want = voices.map((v) => v.voiceURI).join("|");
+    if (sel.dataset.list !== want) {
+      sel.dataset.list = want;
+      sel.innerHTML = voices.length
+        ? voices.map((v) => `<option value="${esc(v.voiceURI)}">${esc(v.name.replace(/^Microsoft |^Google /, ""))}</option>`).join("")
+        : `<option value="">Giọng mặc định</option>`;
+    }
+    const current = voices.find((v) => v.voiceURI === s.voice) || voices[0];
+    if (current) sel.value = current.voiceURI;
+    document.getElementById("ttsHint").textContent = window.TTS.hasVietnamese() ? ""
+      : "Máy chưa có giọng tiếng Việt nên đọc sẽ không chuẩn. Thêm giọng tiếng Việt trong phần Ngôn ngữ / Chuyển văn bản thành giọng nói của máy.";
+  }
+  window.TTS.on(syncTts);
   const FONTS = { serif: '"Noto Serif", Georgia, serif', sans: '"Be Vietnam Pro", system-ui, sans-serif', mono: "ui-monospace, Consolas, monospace" };
 
   async function viewReader(id, chIdx, stale) {
@@ -519,6 +544,7 @@
           <a class="ibtn" href="#/novel/${encodeURIComponent(n.id)}" title="Về trang truyện">←</a>
           <button class="ibtn" id="tocBtn" title="Mục lục">☰</button>
           <div class="ttl">${esc(n.title)} · ${esc(ch.title)}</div>
+          ${window.TTS.supported ? `<button class="ibtn" id="ttsBtn" title="Nghe truyện">🎧</button>` : ""}
           <button class="ibtn music-btn" data-music title="Nhạc nền">♪</button>
           <button class="ibtn" id="setBtn" title="Tuỳ chỉnh">Aa</button>
         </div>
@@ -532,6 +558,19 @@
           <button class="ibtn" id="nextBtn" ${hasNext ? "" : "disabled"}>Chương sau ›</button>
         </div>
         <div class="rprogress" id="rprog"></div>
+        <div class="ttsbar" id="ttsBar" hidden>
+          <div class="tts-row">
+            <button class="ibtn" id="ttsPrev" title="Đoạn trước">⏮</button>
+            <button class="ibtn tts-main" id="ttsPlay" title="Phát / tạm dừng">▶</button>
+            <button class="ibtn" id="ttsNext" title="Đoạn sau">⏭</button>
+            <select class="rselect tts-rate" id="ttsRate" aria-label="Tốc độ đọc">
+              ${[0.75, 1, 1.25, 1.5, 1.75, 2].map((r) => `<option value="${r}">${r}×</option>`).join("")}
+            </select>
+            <select class="rselect" id="ttsVoice" aria-label="Giọng đọc"></select>
+            <button class="ibtn" id="ttsClose" title="Tắt nghe truyện">✕</button>
+          </div>
+          <div class="tts-hint" id="ttsHint"></div>
+        </div>
 
         <div class="backdrop" id="backdrop"></div>
         <aside class="panel left" id="tocPanel">
@@ -612,6 +651,28 @@
     document.getElementById("prevBtn").onclick = () => hasPrev && go(chIdx - 1);
     document.getElementById("nextBtn").onclick = () => hasNext && go(chIdx + 1);
 
+    // nghe truyện
+    const ttsBlocks = [$content.querySelector("h2"), ...$content.querySelectorAll(".body p")];
+    const $ttsBar = document.getElementById("ttsBar");
+    window.TTS.attach(ttsBlocks, () => {
+      if (hasNext) { ttsAutoStart = true; go(chIdx + 1); }
+      else toast("Đã nghe hết chương cuối");
+    });
+    const firstVisible = () => Math.max(0, ttsBlocks.findIndex((b) => b.getBoundingClientRect().bottom > 80));
+    const openTts = (from) => { $ttsBar.hidden = false; syncTts(); window.TTS.play(from); };
+    const ttsBtn = document.getElementById("ttsBtn");
+    if (ttsBtn) ttsBtn.onclick = () => {
+      if ($ttsBar.hidden) openTts(firstVisible());
+      else { window.TTS.stop(); $ttsBar.hidden = true; }
+    };
+    document.getElementById("ttsPlay").onclick = () => window.TTS.toggle();
+    document.getElementById("ttsPrev").onclick = () => window.TTS.prev();
+    document.getElementById("ttsNext").onclick = () => window.TTS.next();
+    document.getElementById("ttsRate").onchange = (e) => window.TTS.setRate(+e.target.value);
+    document.getElementById("ttsVoice").onchange = (e) => window.TTS.setVoice(e.target.value);
+    document.getElementById("ttsClose").onclick = () => { window.TTS.stop(); $ttsBar.hidden = true; };
+    if (ttsAutoStart) { ttsAutoStart = false; openTts(0); }
+
     // progress
     const prev = progress[n.id];
     const sameCh = prev && prev.ch === chIdx;
@@ -640,6 +701,9 @@
     }
     function onTap(e) {
       if (e.target.closest("button, a, .panel")) return;
+      // khi đang mở thanh nghe truyện: chạm vào đoạn nào thì đọc từ đoạn đó
+      const block = !$ttsBar.hidden && e.target.closest("p, h2");
+      if (block && ttsBlocks.includes(block)) return window.TTS.play(ttsBlocks.indexOf(block));
       const x = e.clientX / innerWidth;
       if (x > .3 && x < .7) $bar.classList.toggle("hidden");
     }
@@ -649,6 +713,9 @@
     onScroll();
 
     readerCleanup = () => {
+      // đang nghe mà chuyển chương thì chương mới đọc tiếp
+      if (window.TTS.state.playing) ttsAutoStart = true;
+      window.TTS.detach();
       removeEventListener("scroll", onScroll);
       removeEventListener("keydown", onKey);
       document.body.classList.remove("reading");
@@ -707,6 +774,7 @@
     const stale = () => seq !== routeSeq;
     if (readerCleanup) { readerCleanup(); readerCleanup = null; }
     const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+    if (parts[0] !== "read") { ttsAutoStart = false; window.TTS.stop(); window.Music.duck(false); }
     document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === (parts[0] || "home")));
     window.scrollTo(0, 0);
     try {

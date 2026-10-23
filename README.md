@@ -34,19 +34,37 @@ Cách hoạt động:
 - Mật khẩu Storage gốc luôn đăng nhập được. Nếu đổi mật khẩu Storage trên Bunny, hãy đăng nhập bằng mật khẩu mới rồi đặt lại mật khẩu quản trị.
 - "Ghi nhớ trên máy này" lưu mật khẩu Storage trong trình duyệt. Chỉ bật trên máy riêng của bạn.
 
-Mỗi lần thay EPUB hoặc ảnh bìa, file mới được đặt tên kèm mã thời gian, nên CDN không bao giờ trả bản cũ. File cũ tự bị xoá.
+Mỗi lần thay EPUB hoặc ảnh bìa, nội dung mới được lưu ở thư mục/tên file mới (kèm mã thời gian), nên CDN không bao giờ trả bản cũ. Bản cũ tự bị xoá.
 
 ## Cấu trúc trên Bunny Storage
 
 ```
-/catalog.json            danh sách truyện, nhạc và thông tin trang
-/truyen/*.epub           truyện
-/bia/*.jpg               ảnh bìa (thu nhỏ còn 600px)
-/nhac/*.mp3              nhạc nền tải lên
-/_admin/key.json         mật khẩu quản trị đã mã hoá
+/catalog.json                     danh sách truyện, nhạc và thông tin trang
+/novels/<id>/<phiên bản>/toc.json danh sách tên chương
+/novels/<id>/<phiên bản>/c<k>.json gói 50 chương (c0 = chương 1–50, c1 = 51–100…)
+/bia/*.jpg                        ảnh bìa (thu nhỏ còn 600px)
+/nhac/*.mp3                       nhạc nền tải lên
+/_admin/key.json                  mật khẩu quản trị đã mã hoá
 ```
 
-`catalog.json` do trang quản trị tự ghi. Bạn vẫn có thể sửa tay: mỗi truyện chỉ bắt buộc có `file`, các trường khác web tự lấy từ EPUB.
+Khi đăng truyện, trang quản trị đọc EPUB rồi chia thành các gói 50 chương. Người đọc chỉ tải danh sách chương và gói chứa chương đang đọc (khoảng 150–200 KB), không phải tải cả file EPUB.
+
+`catalog.json` do trang quản trị tự ghi. Truyện thêm tay dạng `{"file": "truyen/abc.epub"}` vẫn đọc được (người đọc tải cả EPUB). Trong trang quản trị, mở **Sửa** truyện đó và bấm **Chuyển sang dạng tải nhanh** để chia gói.
+
+## Tính năng trang đọc
+
+- **Tải nhanh theo gói**: mở truyện dài vài nghìn chương gần như tức thì. Gói kế tiếp được tải trước khi gần đọc hết gói hiện tại.
+- **Cài như ứng dụng (PWA)**:
+  - Trên Android/máy tính, bấm nút **Cài app** trên thanh trên cùng.
+  - Trên iPhone, dùng Safari: bấm **Chia sẻ → Thêm vào MH chính**.
+- **Đọc khi không có mạng**:
+  - Các chương đã mở được lưu lại trên máy.
+  - Nút **Tải về đọc offline** ở trang truyện tải sẵn cả truyện.
+- **Nghe truyện**:
+  - Bấm 🎧 trong trình đọc để nghe bằng giọng đọc có sẵn trên máy.
+  - Chỉnh được tốc độ và giọng đọc. Chạm vào đoạn nào thì đọc từ đoạn đó.
+  - Đọc hết chương thì tự sang chương sau, nhạc nền tự nhỏ lại khi đang đọc.
+  - Cần máy có giọng tiếng Việt. Android và Microsoft Edge thường có sẵn; trên Windows, thêm trong *Cài đặt → Thời gian & ngôn ngữ → Giọng nói*.
 
 ## Cài đặt Bunny
 

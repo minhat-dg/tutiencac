@@ -24,7 +24,7 @@ window.Music = (() => {
     if (ctx) return;
     ctx = new (window.AudioContext || window.webkitAudioContext)();
     master = ctx.createGain();
-    master.gain.value = state.volume;
+    master.gain.value = effective();
     master.connect(ctx.destination);
     reverb = ctx.createConvolver();
     reverb.buffer = impulse(5, 3);
@@ -263,7 +263,7 @@ window.Music = (() => {
     if (up) {
       audioEl = new Audio(up.url);
       audioEl.loop = true;
-      audioEl.volume = state.volume;
+      audioEl.volume = effective();
       audioEl.play().catch(() => { state.playing = false; save(); emit(); });
     } else {
       ensureCtx();
@@ -274,11 +274,22 @@ window.Music = (() => {
   }
   function pause() { stopAll(); state.playing = false; save(); emit(); }
   function toggle() { state.playing ? pause() : play(); }
+  // While a chapter is read aloud the music plays quieter.
+  let ducked = false;
+  const effective = () => state.volume * (ducked ? 0.3 : 1);
+  function applyVolume(ramp = 0.1) {
+    if (master) master.gain.setTargetAtTime(effective(), ctx.currentTime, ramp);
+    if (audioEl) audioEl.volume = effective();
+  }
   function setVolume(v) {
     state.volume = v;
-    if (master) master.gain.setTargetAtTime(v, ctx.currentTime, 0.1);
-    if (audioEl) audioEl.volume = v;
+    applyVolume();
     save(); emit();
+  }
+  function duck(on) {
+    if (ducked === on) return;
+    ducked = on;
+    applyVolume(0.4);
   }
   function setUploaded(tracks) { uploaded = tracks; emit(); }
 
@@ -289,5 +300,5 @@ window.Music = (() => {
     addEventListener("keydown", resume);
   }
 
-  return { state, list, play, pause, toggle, setVolume, setUploaded, on: (fn) => listeners.add(fn) };
+  return { state, list, play, pause, toggle, setVolume, duck, setUploaded, on: (fn) => listeners.add(fn) };
 })();

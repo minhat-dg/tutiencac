@@ -282,3 +282,20 @@ label.check { display: inline-flex !important; grid-auto-flow: column; align-ite
   border: 1px solid var(--r-border); border-radius: 8px; padding: 6px 8px;
 }
 .rrange { width: 100%; accent-color: var(--accent); }
+
+/* ---------- nghe truyện ---------- */
+.rcontent .tts-on { background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 6px; box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent); }
+#ttsBtn.on { color: var(--accent); border-color: var(--accent); }
+.ttsbar {
+  position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 25;
+  width: min(560px, calc(100% - 20px)); padding: 10px 12px;
+  background: var(--r-bg); color: var(--r-text); border: 1px solid var(--r-border);
+  border-radius: 14px; box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
+}
+.tts-row { display: flex; align-items: center; gap: 6px; }
+.tts-row .rselect { flex: 1 1 0; min-width: 0; }
+.tts-row .tts-rate { flex: 0 0 auto; width: auto; }
+.tts-main { background: var(--accent-fill); color: #fff; border-color: var(--accent-fill); min-width: 44px; }
+.tts-hint { font-size: .78rem; color: var(--r-muted); margin-top: 6px; line-height: 1.5; }
+.tts-hint:empty { display: none; }
+.reader:has(.ttsbar:not([hidden])) .rnav { padding-bottom: 130px; }
