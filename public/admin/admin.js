@@ -84,21 +84,34 @@
       const host = /^https?:\/\//.test(conn.host) ? conn.host : "https://" + conn.host;
       return `${host.replace(/\/+$/, "")}/${encodeURIComponent(conn.zone)}/${path.split("/").map(encodeURIComponent).join("/")}`;
     },
-    async req(method, path, { body, onProgress, allow404 } = {}) {
+    async req(method, path, { body, onProgress, allow404, query = "" } = {}) {
       const headers = mode === "cloud"
         ? { Authorization: `Bearer ${await Cloud.freshToken()}`, apikey: Cloud.anonKey }
         : { AccessKey: accessKey };
       if (body != null) headers["Content-Type"] = "application/octet-stream";
-      const x = await xhr(method, this.url(path), { headers, body, onProgress });
+      const x = await xhr(method, this.url(path) + query, { headers, body, onProgress });
       if (x.status === 404 && allow404) return null;
       if (x.status === 401) throw Object.assign(new Error(mode === "cloud" ? "Phiên đăng nhập đã hết, hãy đăng nhập lại" : "Mật khẩu Storage không đúng"), { auth: true });
       if (x.status === 403) throw Object.assign(new Error("Tài khoản này chưa có quyền quản trị"), { forbidden: true });
       if (x.status < 200 || x.status >= 300) {
         let detail = "";
         try { detail = JSON.parse(x.responseText).error || ""; } catch {}
-        throw new Error(detail || `Bunny báo lỗi ${x.status} khi ${method} ${path || "/"}`);
+        throw Object.assign(new Error(detail || `Bunny báo lỗi ${x.status} khi ${method} ${path || "/"}`), { status: x.status });
       }
       return x;
+    },
+    // Ghi nhiều file trong MỘT request (chỉ khi qua Edge Function, xem supabase/functions/bunny).
+    // Body: lặp lại [độ dài đường dẫn u32][đường dẫn UTF-8][độ dài dữ liệu u32][dữ liệu]
+    async batch(files, onProgress) {
+      const enc = new TextEncoder(), paths = files.map((f) => enc.encode(f.path));
+      const size = files.reduce((s, f, i) => s + 8 + paths[i].length + f.body.length, 0);
+      const buf = new Uint8Array(size), dv = new DataView(buf.buffer);
+      let o = 0;
+      files.forEach((f, i) => {
+        dv.setUint32(o, paths[i].length); o += 4; buf.set(paths[i], o); o += paths[i].length;
+        dv.setUint32(o, f.body.length); o += 4; buf.set(f.body, o); o += f.body.length;
+      });
+      return this.req("POST", "", { body: buf, onProgress, query: "&batch=1" });
     },
     // Bunny Storage answers 401 (not 404) for a file that does not exist. If the key still
     // lists the zone root, the 401 only means "missing".
@@ -589,6 +602,7 @@
   // Mỗi gói được nén gzip trước khi gửi (nhẹ hơn ~3–4 lần); trang đọc tự giải nén.
   const CHUNK = 50;
   const PARALLEL = 6;
+  const BATCH_BYTES = 4 * 1048576, BATCH_PARALLEL = 3;   // gửi theo lô qua Edge Function
   async function gzip(bytes) {
     if (!("CompressionStream" in window)) return bytes; // trình duyệt quá cũ: gửi nguyên
     const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"));
@@ -603,25 +617,52 @@
     const jobs = await Promise.all(raw.map(async (j) => ({ path: j.path, body: await gzip(enc.encode(JSON.stringify(j.data))) })));
     const total = jobs.reduce((s, j) => s + j.body.length, 0);
     const sent = new Map();
-    let finished = 0, next = 0;
+    let finished = 0;
     const report = () => {
       const bytes = [...sent.values()].reduce((a, b) => a + b, 0);
       progress(`Đang tải truyện lên… ${finished}/${jobs.length} gói · ${(bytes / 1048576).toFixed(1)}/${(total / 1048576).toFixed(1)} MB`, bytes / total);
     };
-    const worker = async () => {
-      while (next < jobs.length) {
-        const j = jobs[next++];
-        for (let attempt = 1; ; attempt++) {
-          try { await Bunny.put(j.path, j.body, (r) => { sent.set(j.path, r * j.body.length); report(); }); break; }
-          catch (e) { if (attempt >= 3) throw e; await new Promise((r) => setTimeout(r, 1000 * attempt)); }
-        }
-        sent.set(j.path, j.body.length);
-        finished++;
-        report();
+    const retry = async (fn) => {
+      for (let attempt = 1; ; attempt++) {
+        try { return await fn(); }
+        catch (e) { if (attempt >= 3 || e.status === 405) throw e; await new Promise((r) => setTimeout(r, 1000 * attempt)); }
       }
     };
-    try { await Promise.all(Array.from({ length: Math.min(PARALLEL, jobs.length) }, worker)); }
-    catch (e) { Bunny.del(asDir(dir)).catch(() => {}); throw e; }
+    // chạy các việc với tối đa n việc cùng lúc
+    const pool = async (items, n, fn) => {
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (next < items.length) await fn(items[next++]); }));
+    };
+
+    // Qua Edge Function: gom các gói thành lô ~4 MB, mỗi lô một request (đỡ preflight + một chặng mạng mỗi gói).
+    // Function bản cũ chưa có lô (trả 405) → gửi từng gói như trước.
+    let pending = jobs;
+    if (mode === "cloud") {
+      const batches = [];
+      for (const j of jobs) {
+        const last = batches[batches.length - 1];
+        if (last && last.size + j.body.length <= BATCH_BYTES) { last.files.push(j); last.size += j.body.length; }
+        else batches.push({ files: [j], size: j.body.length });
+      }
+      try {
+        await pool(batches, BATCH_PARALLEL, (b) => retry(async () => {
+          await Bunny.batch(b.files, (r) => { b.files.forEach((f) => sent.set(f.path, r * f.body.length)); report(); });
+          b.files.forEach((f) => sent.set(f.path, f.body.length));
+          finished += b.files.length; b.done = true; report();
+        }));
+        pending = [];
+      } catch (e) {
+        if (e.status !== 405) { Bunny.del(asDir(dir)).catch(() => {}); throw e; }
+        pending = batches.filter((b) => !b.done).flatMap((b) => b.files);
+      }
+    }
+    try {
+      await pool(pending, PARALLEL, (j) => retry(async () => {
+        await Bunny.put(j.path, j.body, (r) => { sent.set(j.path, r * j.body.length); report(); });
+        sent.set(j.path, j.body.length);
+        finished++; report();
+      }));
+    } catch (e) { Bunny.del(asDir(dir)).catch(() => {}); throw e; }
     return { dir, chunk: CHUNK, words: chapters.reduce((s, c) => s + c.content.split(/\s+/).filter(Boolean).length, 0) };
   }
 

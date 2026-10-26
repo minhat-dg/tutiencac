@@ -29,7 +29,7 @@ function MockBunny($ctx, $rel, [bool]$viaFunction = $false) {
   $req = $ctx.Request; $res = $ctx.Response; $m = $req.HttpMethod
   $res.AddHeader("Access-Control-Allow-Origin", "*")
   $res.AddHeader("Access-Control-Allow-Headers", "AccessKey, Content-Type, Authorization, apikey")
-  $res.AddHeader("Access-Control-Allow-Methods", "GET, HEAD, PUT, DELETE, OPTIONS")
+  $res.AddHeader("Access-Control-Allow-Methods", "GET, HEAD, PUT, POST, DELETE, OPTIONS")
   if ($m -eq "OPTIONS") { $res.StatusCode = 204; return }
   $target = [IO.Path]::GetFullPath((Join-Path $mockRoot $rel))
   if (-not ($target + "\").StartsWith($mockRoot + "\")) { $res.StatusCode = 400; return }
@@ -68,6 +68,27 @@ function MockBunny($ctx, $rel, [bool]$viaFunction = $false) {
   $res.StatusCode = 405
 }
 
+# POST ?batch=1 của Edge Function: nhiều file trong một body,
+# lặp lại [độ dài đường dẫn u32 BE][đường dẫn UTF-8][độ dài dữ liệu u32 BE][dữ liệu]
+function MockBatch($ctx) {
+  $res = $ctx.Response
+  $res.AddHeader("Access-Control-Allow-Origin", "*")
+  $ms = [IO.MemoryStream]::new(); $ctx.Request.InputStream.CopyTo($ms); $b = $ms.ToArray()
+  $u32 = { param($o) ([int64]$b[$o] -shl 24) -bor ([int64]$b[$o + 1] -shl 16) -bor ([int64]$b[$o + 2] -shl 8) -bor $b[$o + 3] }
+  $o = 0; $n = 0
+  while ($o -lt $b.Length) {
+    $pl = & $u32 $o; $o += 4
+    $path = $utf8.GetString($b, $o, $pl); $o += $pl
+    $dl = & $u32 $o; $o += 4
+    $target = [IO.Path]::GetFullPath((Join-Path $mockRoot ("test/" + $path)))
+    if (-not ($target + "\").StartsWith($mockRoot + "\") -or $o + $dl -gt $b.Length) { $res.StatusCode = 400; return }
+    [void](New-Item -ItemType Directory -Force ([IO.Path]::GetDirectoryName($target)))
+    $chunk = New-Object byte[] $dl; [Array]::Copy($b, $o, $chunk, 0, $dl); [IO.File]::WriteAllBytes($target, $chunk)
+    $o += $dl; $n++
+  }
+  SendBytes $res $utf8.GetBytes("{""count"":$n,""failed"":[]}") "application/json" "POST"
+}
+
 # Imitation of the Supabase Edge Function "bunny" (supabase/functions/bunny):
 # token "tok-admin" = admin, "tok-user" = signed in without admin rights.
 function MockFunction($ctx) {
@@ -79,6 +100,7 @@ function MockFunction($ctx) {
     if ($kv[0] -eq "path" -and $kv.Length -eq 2) { $path = [Uri]::UnescapeDataString($kv[1]) }
   }
   $auth = [string]$req.Headers["Authorization"]
+  if ($auth -eq "Bearer tok-admin" -and $req.HttpMethod -eq "POST") { return MockBatch $ctx }
   if ($auth -eq "Bearer tok-admin") { return MockBunny $ctx ("test/" + $path) $true }
   $res.AddHeader("Access-Control-Allow-Origin", "*")
   $res.StatusCode = $(if ($auth -eq "Bearer tok-user") { 403 } else { 401 })
