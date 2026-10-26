@@ -738,8 +738,8 @@
     }
     const current = voices.find((v) => v.voiceURI === s.voice) || voices[0];
     if (current) sel.value = current.voiceURI;
-    document.getElementById("ttsHint").textContent = window.TTS.hasVietnamese() ? ""
-      : "Máy chưa có giọng tiếng Việt nên đọc sẽ không chuẩn. Thêm giọng tiếng Việt trong phần Ngôn ngữ / Chuyển văn bản thành giọng nói của máy.";
+    document.getElementById("ttsHint").textContent = window.TTS.status() || (window.TTS.hasVietnamese() ? ""
+      : "Máy chưa có giọng tiếng Việt nên đọc sẽ không chuẩn. Chọn Giọng AI, hoặc thêm giọng tiếng Việt trong phần Ngôn ngữ / Chuyển văn bản thành giọng nói của máy.");
   }
   window.TTS.on(syncTts);
   const FONTS = { serif: '"Noto Serif", Georgia, serif', sans: '"Be Vietnam Pro", system-ui, sans-serif', mono: "ui-monospace, Consolas, monospace" };
