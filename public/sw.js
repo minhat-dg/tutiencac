@@ -1,9 +1,11 @@
 // Service worker: lưu khung ứng dụng để mở được khi không có mạng.
 // Nội dung chương do trang đọc tự lưu trong IndexedDB, nên ở đây không lưu gói chương hay EPUB.
 // Đổi VERSION khi thay danh sách CORE.
-const VERSION = "v7";
+const VERSION = "v8";
 const SHELL = `shell-${VERSION}`;
-const RUNTIME = "runtime-v1";
+// v1 lưu ảnh bìa/thư viện CDN dạng opaque (no-cors): trang bật COEP thì trình duyệt chặn các bản đó
+// → đổi tên để activate xoá sạch, từ nay chỉ lưu bản tải bằng CORS.
+const RUNTIME = "runtime-v2";
 const CORE = [
   "/", "/style.css", "/config.js", "/manifest.webmanifest",
   "/js/app.js", "/js/music.js", "/js/tts.js", "/js/cloud.js", "/js/epub.js", "/js/mobi.js", "/js/demo-data.js",
@@ -43,12 +45,17 @@ async function networkFirst(req, cacheName) {
   }
 }
 
+// File khác domain (ảnh bìa Bunny, phông, thư viện CDN): tải bằng CORS chứ không no-cors.
+// Trang có header Cross-Origin-Embedder-Policy nên phản hồi opaque do service worker trả về bị chặn
+// (ảnh bìa hiện biểu tượng hỏng). Các máy chủ này đều trả CORS. Lỗi CORS thì để trình duyệt tự tải.
 async function cacheFirst(req, cacheName) {
   const cache = await caches.open(cacheName);
-  const cached = await cache.match(req);
+  const cached = await cache.match(req.url);
   if (cached) return cached;
-  const res = await fetch(req);
-  if (res.ok || res.type === "opaque") cache.put(req, res.clone());
+  let res;
+  try { res = await fetch(req.url, { mode: "cors", credentials: "omit" }); }
+  catch { return fetch(req); }
+  if (res.ok) cache.put(req.url, res.clone());
   return res;
 }
 
