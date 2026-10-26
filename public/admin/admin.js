@@ -447,11 +447,27 @@
     return null;
   }
 
+  // PRC/MOBI lớn (vài nghìn chương) đọc trong Web Worker để trang không đứng hình, có báo tiến độ.
+  // Trình duyệt không tạo được worker thì đọc ngay trên trang như trước.
+  function parseMobi(file, progress) {
+    let w;
+    try { w = new Worker("/js/mobi-worker.js"); } catch { return window.Mobi.parse(file, progress); }
+    return new Promise((resolve, reject) => {
+      w.onmessage = ({ data }) => {
+        if (data.type === "progress") return progress(`${data.label} ${Math.round(data.r * 100)}%`, data.r);
+        w.terminate();
+        if (data.type === "done") resolve(data.book); else reject(new Error(data.message));
+      };
+      w.onerror = (e) => { w.terminate(); e.preventDefault(); window.Mobi.parse(file, progress).then(resolve, reject); };
+      w.postMessage(file);
+    });
+  }
+
   async function readBook(file) {
     const kind = await bookKind(file);
     if (!kind) { toast(`"${file.name}" không phải file EPUB hay PRC/MOBI`); throw new Error("kind"); }
-    const parser = kind === "mobi" ? window.Mobi : window.Epub;
-    const parsed = await busy(`Đang đọc ${file.name}…`, () => parser.parse(file));
+    const parsed = await busy(`Đang đọc ${file.name}…`, (progress) =>
+      kind === "mobi" ? parseMobi(file, progress) : window.Epub.parse(file));
     let cover = null;
     if (parsed.cover) { try { cover = await toJpeg(parsed.cover); } catch {} }
     return { parsed, cover };

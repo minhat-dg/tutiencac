@@ -1,17 +1,39 @@
 // Đọc file PRC / MOBI / AZW3 (định dạng Kindle cũ) ngay trên trình duyệt.
 // Trả về cùng dạng với Epub.parse: { title, author, description, tags, cover, chapters: [{title, content}] }.
-window.Mobi = (() => {
+// Dùng được cả trên trang lẫn trong Web Worker (js/mobi-worker.js), nên gắn vào globalThis.
+globalThis.Mobi = (() => {
   "use strict";
 
   // Hàm lấy chữ từ HTML (tự chứa, để không lệ thuộc phiên bản epub.js đang được lưu đệm)
   const clean = (s) => (s || "").normalize("NFC").replace(/\s+/g, " ").trim();
+
+  // HTML của MOBI rất đơn giản (p, br, a, font, mbp:pagebreak…) nên tách chữ bằng regex thay cho DOMParser:
+  // dựng cây DOM cho từng chương chiếm phần lớn thời gian đọc một file vài nghìn chương.
+  // Xuống dòng ở <br> và sau mỗi thẻ khối, như bản DOMParser cũ (e.after("\n")).
+  const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", hellip: "…", mdash: "—", ndash: "–",
+    lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”", laquo: "«", raquo: "»", middot: "·", bull: "•", copy: "©", shy: "­" };
+  let entityBox = null;   // giải các thực thể hiếm gặp bằng trình duyệt (chỉ khi cần; trong worker không có DOM)
+  function decodeEntity(m, name) {
+    if (name[0] === "#") {
+      const cp = name[1] === "x" || name[1] === "X" ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+      return cp > 0 && cp <= 0x10FFFF ? String.fromCodePoint(cp) : m;
+    }
+    if (name in ENTITIES) return ENTITIES[name];
+    if (typeof document === "undefined") return m;
+    entityBox = entityBox || document.createElement("textarea");
+    entityBox.innerHTML = m;
+    return entityBox.value;
+  }
+  const BLOCK_END = /<\/(?:p|div|h[1-6]|li|blockquote|tr|section)\s*>/gi;
   function paragraphs(html) {
-    const body = new DOMParser().parseFromString(html || "", "text/html").body;
-    if (!body) return [];
-    body.querySelectorAll("script, style").forEach((e) => e.remove());
-    body.querySelectorAll("br").forEach((e) => e.replaceWith("\n"));
-    body.querySelectorAll("p, div, h1, h2, h3, h4, h5, h6, li, blockquote, tr, section").forEach((e) => e.after("\n"));
-    return body.textContent.split("\n").map(clean).filter(Boolean);
+    if (!html) return [];
+    const text = html
+      .replace(/<!--[\s\S]*?-->|<(script|style|head)\b[\s\S]*?<\/\1\s*>/gi, "")
+      .replace(/<br\b[^>]*>/gi, "\n")
+      .replace(BLOCK_END, "\n")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]*);/gi, decodeEntity);
+    return text.split("\n").map(clean).filter(Boolean);
   }
   const htmlToText = (html) => paragraphs(html).join("\n");
 
@@ -52,18 +74,20 @@ window.Mobi = (() => {
   function huffReader(records) {
     const huff = records[0];
     if (!huff || ascii(huff, 0, 4) !== "HUFF") throw new Error("Dữ liệu nén HUFF không hợp lệ");
-    const POW = Array.from({ length: 33 }, (_, i) => 2 ** i);
+    const POW = Float64Array.from({ length: 33 }, (_, i) => 2 ** i);
     const off1 = u32(huff, 8), off2 = u32(huff, 12);
-    const dict1 = [];
+    // bảng tra theo 8 bit đầu của mã: độ dài, cờ "đủ để kết luận", mã lớn nhất (mảng kiểu cố định, không tạo mảng mỗi ký hiệu)
+    const d1len = new Uint8Array(256), d1term = new Uint8Array(256), d1max = new Float64Array(256);
     for (let i = 0; i < 256; i++) {
       const v = u32(huff, off1 + i * 4);
       const len = v & 0x1F;
-      dict1.push([len, v & 0x80, ((v >>> 8) + 1) * POW[32 - len] - 1]);
+      d1len[i] = len; d1term[i] = v & 0x80 ? 1 : 0; d1max[i] = ((v >>> 8) + 1) * POW[32 - len] - 1;
     }
-    const mincode = [0], maxcode = [POW[32] - 1];
+    const mincode = new Float64Array(33), maxcode = new Float64Array(33);
+    maxcode[0] = POW[32] - 1;
     for (let L = 1; L <= 32; L++) {
-      mincode.push(u32(huff, off2 + (L - 1) * 8) * POW[32 - L]);
-      maxcode.push((u32(huff, off2 + (L - 1) * 8 + 4) + 1) * POW[32 - L] - 1);
+      mincode[L] = u32(huff, off2 + (L - 1) * 8) * POW[32 - L];
+      maxcode[L] = (u32(huff, off2 + (L - 1) * 8 + 4) + 1) * POW[32 - L] - 1;
     }
     const dict = [];
     for (const cdic of records.slice(1)) {
@@ -77,25 +101,26 @@ window.Mobi = (() => {
 
     function unpack(data) {
       const word = (p) => ((data[p] << 24) | (data[p + 1] << 16) | (data[p + 2] << 8) | data[p + 3]) >>> 0; // ngoài mảng = 0
-      const out = [];
-      let size = 0, bitsleft = data.length * 8, pos = 0, hi = word(0), lo = word(4), n = 32;
+      let out = new Uint8Array(Math.max(64, data.length * 4)), size = 0;   // ghi thẳng vào một bộ đệm, nới khi đầy
+      let bitsleft = data.length * 8, pos = 0, hi = word(0), lo = word(4), n = 32;
       for (;;) {
         if (n <= 0) { pos += 4; hi = lo; lo = word(pos + 4); n += 32; }
         const code = n >= 32 ? hi : ((hi << (32 - n)) | (lo >>> n)) >>> 0;  // 32 bit kế tiếp
-        let [len, term, max] = dict1[code >>> 24];
-        if (!term) { while (code < mincode[len]) len++; max = maxcode[len]; }
+        const top = code >>> 24;
+        let len = d1len[top], max = d1max[top];
+        if (!d1term[top]) { while (code < mincode[len]) len++; max = maxcode[len]; }
         n -= len;
         bitsleft -= len;
         if (bitsleft < 0) break;
         const e = dict[Math.floor((max - code) / POW[32 - len])];
         if (!e) throw new Error("Dữ liệu nén HUFF bị hỏng");
         if (!e.done) { e.done = true; e.data = unpack(e.data); }
-        out.push(e.data);
-        size += e.data.length;
+        const d = e.data;
+        if (size + d.length > out.length) { const bigger = new Uint8Array(Math.max(out.length * 2, size + d.length)); bigger.set(out.subarray(0, size)); out = bigger; }
+        out.set(d, size);
+        size += d.length;
       }
-      const res = new Uint8Array(size);
-      for (let i = 0, o = 0; i < out.length; o += out[i].length, i++) res.set(out[i], o);
-      return res;
+      return out.slice(0, size);
     }
     return unpack;
   }
@@ -127,7 +152,8 @@ window.Mobi = (() => {
   // Chương mở đầu bằng "Chương 12", "Chapter 3", "Hồi 5", "Quyển 2"…
   const CHAPTER_LINE = /^\s*(chương|chuong|chapter|hồi|hoi|quyển|quyen|tiết|第)\s*[0-9０-９一二三四五六七八九十百千零〇IVXLC]+/i;
 
-  async function parse(file) {
+  // onProgress(nhãn, tỉ lệ 0..1): giải nén ~60%, chia chương ~40% thời gian
+  async function parse(file, onProgress = () => {}) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (!isMobi(bytes)) throw new Error("Không phải file PRC/MOBI hợp lệ");
 
@@ -190,12 +216,13 @@ window.Mobi = (() => {
       const out = compression === 2 ? palmdoc(data) : unhuff ? unhuff(data) : data;
       parts.push(out);
       total += out.length;
+      if (i % 64 === 0) onProgress("Đang giải nén…", (0.6 * i) / textRecords);
     }
     const text = new Uint8Array(total);
     for (let i = 0, o = 0; i < parts.length; o += parts[i].length, i++) text.set(parts[i], o);
     const body = text.subarray(0, Math.min(textLength || total, total));
 
-    const chapters = splitChapters(body, decoder);
+    const chapters = splitChapters(body, decoder, (r) => onProgress("Đang chia chương…", 0.6 + 0.4 * r));
     if (!chapters.length) throw new Error("Không tìm thấy nội dung chương trong file");
 
     // ---- ảnh bìa ----
@@ -221,7 +248,7 @@ window.Mobi = (() => {
 
   // Chia chương: ưu tiên mục lục (<a filepos=…>) vì nó chỉ đúng vị trí byte của từng chương;
   // không có thì chia theo ngắt trang / dòng "Chương N".
-  function splitChapters(body, decoder) {
+  function splitChapters(body, decoder, onProgress = () => {}) {
     const latin = new TextDecoder("latin1").decode(body); // 1 byte = 1 ký tự: vị trí trùng với filepos
     const links = [];
     const re = /<a\b[^>]*\bfilepos\s*=\s*["']?(\d+)["']?[^>]*>([\s\S]*?)<\/a>/gi;
@@ -250,6 +277,7 @@ window.Mobi = (() => {
         if (tocStart > l.pos && tocStart < end) end = latin.lastIndexOf("<mbp:pagebreak", tocStart) > l.pos ? latin.lastIndexOf("<mbp:pagebreak", tocStart) : tocStart;
         const ch = chapterOf(l.pos, end, l.label);
         if (ch.content.length >= 20) out.push(ch);
+        if (i % 100 === 0) onProgress(i / toc.length);
       });
       if (out.length >= 2) return out;
     }
