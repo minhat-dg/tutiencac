@@ -67,6 +67,13 @@ Khi đăng truyện, trang quản trị đọc EPUB rồi chia thành các gói 
   - Chỉnh được tốc độ và giọng đọc. Chạm vào đoạn nào thì đọc từ đoạn đó.
   - Đọc hết chương thì tự sang chương sau, nhạc nền tự nhỏ lại khi đang đọc.
   - Cần máy có giọng tiếng Việt. Android và Microsoft Edge thường có sẵn; trên Windows, thêm trong *Cài đặt → Thời gian & ngôn ngữ → Giọng nói*.
+- **Giọng AI · Người kể chuyện**: chọn trong ô giọng đọc của thanh nghe. Giọng được tạo ngay trên máy người đọc, không qua máy chủ.
+  - Dùng model [VieNeu-TTS v3 Nano](https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Nano) (Apache-2.0) chạy bằng onnxruntime-web trong Web Worker. Giọng người kể chuyện là giọng clone, lưu sẵn ở `public/ai-voice/narrator.json`.
+  - Lần đầu tải khoảng 280 MB model từ Hugging Face, lưu trong bộ nhớ trình duyệt (Cache Storage). Các lần sau mở ngay, kể cả khi mất mạng.
+  - Đọc từng câu: câu đầu phát sau vài giây, trong lúc nghe trang tự sinh trước 3 đoạn phía sau.
+  - Chuyển chữ thành âm vị bằng bảng tra âm tiết `public/ai-voice/g2p_vi.json` (khoảng 100 KB khi nén), khớp 98,9% với bộ sea-g2p gốc.
+  - Cần header `Cross-Origin-Opener-Policy` / `Cross-Origin-Embedder-Policy` (đã có trong `vercel.json` và `serve.ps1`) để chạy đa luồng. Trình duyệt không hỗ trợ (Safari cũ) vẫn chạy được nhưng chỉ 1 luồng, chậm hơn.
+  - Laptop Core i5 đời 12: tạo giọng nhanh gấp khoảng 1,7 lần tốc độ nghe. Máy yếu hơn có thể phải chờ giữa các đoạn.
 
 ## Cài đặt Bunny
 

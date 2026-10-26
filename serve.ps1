@@ -98,6 +98,9 @@ try {
     $res = $ctx.Response
     try {
       $res.AddHeader("Cache-Control", "no-store")
+      # cô lập cross-origin (giống vercel.json) để giọng AI chạy WASM đa luồng
+      $res.AddHeader("Cross-Origin-Opener-Policy", "same-origin")
+      $res.AddHeader("Cross-Origin-Embedder-Policy", "credentialless")
       $path = [Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath).TrimStart("/")
       if ($Mock -and $path.StartsWith("_mock/sb/functions/v1/bunny")) { MockFunction $ctx; continue }
       if ($Mock -and $path.StartsWith("_mock/")) { MockBunny $ctx $path.Substring(6); continue }
