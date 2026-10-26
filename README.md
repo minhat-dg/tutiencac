@@ -105,6 +105,7 @@ Các bước (làm trên dashboard Supabase, không cần cài gì):
    - Đặt tên `bunny`.
    - Dán nội dung [`supabase/functions/bunny/index.ts`](supabase/functions/bunny/index.ts).
    - Bấm **Deploy**, để nguyên *Verify JWT* đang bật.
+   - Mỗi lần file này thay đổi, dán lại và Deploy lại. Bản hiện tại nhận **lô nhiều file trong một request** (`POST ?batch=1`): trang quản trị gom các gói chương thành lô ~4 MB, function tự ghi song song lên Bunny. Đăng truyện nhanh hơn nhiều so với gửi từng gói (mỗi gói tốn thêm một preflight CORS và một lượt trình duyệt → Supabase → Bunny). Function bản cũ chưa có lô thì trang tự gửi từng gói như trước.
 4. **Edge Functions → Secrets**, thêm 3 biến:
    - `BUNNY_STORAGE_ZONE` = tên Storage Zone, ví dụ `tutiencac`.
    - `BUNNY_STORAGE_KEY` = mật khẩu Storage, lấy ở Bunny → Storage → FTP & API Access → Password.
