@@ -18,6 +18,21 @@ window.Epub = (() => {
   const parseXml = (s) => new DOMParser().parseFromString(s, "application/xml");
   const byTag = (node, tag) => [...node.getElementsByTagNameNS("*", tag)];
   const clean = (s) => (s || "").normalize("NFC").replace(/\s+/g, " ").trim();
+
+  // Số dòng đầu (tối đa 3) ghép lại đúng bằng tên chương, vd "Chương 2" + "Tiên Nhân" = "Chương 2 Tiên Nhân"
+  // giải mã cả ký tự HTML còn sót trong file gốc (vd "&#8211;", "&amp;#8211;") trước khi so
+  const titleKey = (s) => s.replace(/&amp;/g, "&").replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d))
+    .normalize("NFC").toLowerCase().replace(/[\s:：.,\-–—]+/g, " ").trim();
+  function titleLines(paras, title) {
+    const want = titleKey(title || "");
+    if (!want) return 0;
+    for (let k = 1; k <= Math.min(3, paras.length); k++) {
+      const got = titleKey(paras.slice(0, k).join(" "));
+      if (got === want) return k;
+      if (!want.startsWith(got)) break;
+    }
+    return 0;
+  }
   // href is relative to the file that contains it
   const resolve = (fromFile, href) => decodeURIComponent(new URL(href, "http://x/" + fromFile).pathname.slice(1));
 
@@ -118,7 +133,7 @@ window.Epub = (() => {
       const paras = paragraphs(body);
       if (paras.join("").length < 20) continue; // trang bìa, trang trống
       const title = titles[item.href] || heading || `Chương ${chapters.length + 1}`;
-      if (paras[0] && paras[0].toLowerCase() === title.toLowerCase()) paras.shift();
+      paras.splice(0, titleLines(paras, title));
       chapters.push({ title, content: paras.join("\n") });
     }
     if (!chapters.length) throw new Error("Không tìm thấy chương nào trong EPUB");

@@ -37,6 +37,21 @@ globalThis.Mobi = (() => {
   }
   const htmlToText = (html) => paragraphs(html).join("\n");
 
+  // Số dòng đầu (tối đa 3) ghép lại đúng bằng tên chương, vd "Chương 2" + "Tiên Nhân" = "Chương 2 Tiên Nhân"
+  // giải mã cả ký tự HTML còn sót trong file gốc (vd "&#8211;", "&amp;#8211;") trước khi so
+  const titleKey = (s) => s.replace(/&amp;/g, "&").replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d))
+    .normalize("NFC").toLowerCase().replace(/[\s:：.,\-–—]+/g, " ").trim();
+  function titleLines(paras, title) {
+    const want = titleKey(title || "");
+    if (!want) return 0;
+    for (let k = 1; k <= Math.min(3, paras.length); k++) {
+      const got = titleKey(paras.slice(0, k).join(" "));
+      if (got === want) return k;
+      if (!want.startsWith(got)) break;
+    }
+    return 0;
+  }
+
   const u16 = (b, o) => (b[o] << 8) | b[o + 1];
   const u32 = (b, o) => ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0;
   const ascii = (b, o, n) => String.fromCharCode(...b.subarray(o, o + n));
@@ -264,7 +279,7 @@ globalThis.Mobi = (() => {
       const paras = paragraphs(decoder.decode(body.subarray(from, to)));
       const first = paras[0] || "";
       const title = fallbackTitle || (first.length < 120 ? first : "");
-      if (paras[0] && title && paras[0].toLowerCase() === title.toLowerCase()) paras.shift();
+      paras.splice(0, titleLines(paras, title));
       return { title, content: paras.join("\n") };
     };
 
