@@ -194,7 +194,7 @@
         ...normalize({ id: n.id, file: n.id, title: n.title, author: n.author, tags: n.tags, status: n.status, description: n.description, chapters: n.chapters.length }),
         colors: n.colors, demo: n,
       }));
-      return [];
+      return;
     }
     if (window.Cloud.enabled) {
       // Danh sách truyện nằm trong database Supabase: lần nào cũng là bản mới nhất.
@@ -213,7 +213,7 @@
       const seen = new Set();
       novels = (lib.novels || []).filter((e) => e && (e.file || e.dir) && !e.hidden).map(normalize)
         .filter((n) => !seen.has(n.id) && seen.add(n.id));
-      return lib.music || [];
+      return;
     }
     // Chưa dùng Supabase: đọc catalog.json trên CDN, chặn cache bằng query theo phút.
     const r = await fetch(cdnUrl("catalog.json") + "?v=" + Math.floor(Date.now() / 60000), { cache: "no-cache" });
@@ -224,7 +224,6 @@
     novels = list.filter((e) => e && (e.file || e.dir) && !e.hidden).map(normalize);
     const seen = new Set();
     novels = novels.filter((n) => !seen.has(n.id) && seen.add(n.id));
-    return Array.isArray(cat) ? [] : cat.music || [];
   }
   const findNovel = (id) => novels.find((n) => n.id === id);
   let libraryStale = false; // đang dùng danh sách đã lưu vì không tải được bản mới
@@ -504,7 +503,7 @@
       </div>
     `;
     document.getElementById("exportBtn").onclick = () => {
-      const data = { app: "tutiencac", v: 1, progress, shelf: [...shelf], settings, music: LS.get("music", {}) };
+      const data = { app: "tutiencac", v: 1, progress, shelf: [...shelf], settings };
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }));
       a.download = `tutiencac-saoluu-${new Date().toISOString().slice(0, 10)}.json`;
@@ -739,7 +738,6 @@
   function syncTts() {
     const bar = document.getElementById("ttsBar");
     const s = window.TTS.state;
-    window.Music.duck(s.playing);
     if (!bar) return;
     document.getElementById("ttsPlay").textContent = s.playing ? "❚❚" : "▶";
     document.getElementById("ttsBtn")?.classList.toggle("on", !bar.hidden);
@@ -792,7 +790,6 @@
           <button class="ibtn" id="tocBtn" title="Mục lục">☰</button>
           <div class="ttl">${esc(n.title)} · ${esc(ch.title)}</div>
           ${window.TTS.supported ? `<button class="ibtn" id="ttsBtn" title="Nghe truyện">🎧</button>` : ""}
-          <button class="ibtn music-btn" data-music title="Nhạc nền">♪</button>
           <button class="ibtn" id="setBtn" title="Tuỳ chỉnh">Aa</button>
         </div>
         <article class="rcontent" id="rcontent">
@@ -842,16 +839,10 @@
           <div class="setrow"><label>Độ rộng trang</label><div class="ctl">
             ${[[600, "Hẹp"], [720, "Vừa"], [900, "Rộng"]].map(([v, l]) => `<button class="seg ${settings.width === v ? "active" : ""}" data-w="${v}">${l}</button>`).join("")}
           </div></div>
-          <div class="setrow"><label>Nhạc nền</label><div class="ctl">
-            <button class="seg" id="rMusicPlay">▶ Phát</button>
-            <select class="rselect" id="rMusicTrack" aria-label="Chọn bài nhạc"></select>
-          </div></div>
-          <div class="setrow"><label for="rMusicVol">Âm lượng nhạc</label><input type="range" class="rrange" id="rMusicVol" min="0" max="100"></div>
           <div class="setrow"><label>Phím tắt</label><div class="hint">← → : chuyển chương<br>Chạm giữa màn hình : ẩn/hiện thanh công cụ</div></div>
         </aside>
       </div>
     `;
-    syncMusicButtons();
 
     const $reader = $app.querySelector(".reader");
     const $content = document.getElementById("rcontent");
@@ -888,11 +879,6 @@
       else return;
       saveSettings(); applyStyle();
     });
-
-    document.getElementById("rMusicPlay").onclick = () => window.Music.toggle();
-    document.getElementById("rMusicTrack").onchange = (e) => window.Music.play(e.target.value);
-    document.getElementById("rMusicVol").oninput = (e) => window.Music.setVolume(e.target.value / 100);
-    syncReaderMusic();
 
     const go = (i) => { location.hash = base + i; };
     document.getElementById("prevBtn").onclick = () => hasPrev && go(chIdx - 1);
@@ -976,50 +962,6 @@
     };
   }
 
-  // ---------- music panel ----------
-  const $mPanel = document.getElementById("musicPanel");
-  const $mBack = document.getElementById("musicBackdrop");
-  function renderMusicPanel() {
-    const s = window.Music.state;
-    document.getElementById("musicList").innerHTML = window.Music.list().map((t) =>
-      `<li><button class="mtrack ${t.id === s.id ? "active" : ""}" data-track="${esc(t.id)}">
-        <span class="mt">${t.id === s.id && s.playing ? "♫ " : ""}${esc(t.title)}</span>
-        ${t.desc ? `<span class="md">${esc(t.desc)}</span>` : ""}</button></li>`
-    ).join("");
-    document.getElementById("musicPlay").textContent = s.playing ? "❚❚ Tạm dừng" : "▶ Phát";
-    document.getElementById("musicVol").value = Math.round(s.volume * 100);
-  }
-  function syncMusicButtons() {
-    document.querySelectorAll("[data-music]").forEach((b) => b.classList.toggle("on", window.Music.state.playing));
-  }
-  // Music controls inside the reader's settings panel
-  function syncReaderMusic() {
-    const play = document.getElementById("rMusicPlay");
-    if (!play) return;
-    const s = window.Music.state;
-    play.textContent = s.playing ? "❚❚ Tạm dừng" : "▶ Phát";
-    play.classList.toggle("active", s.playing);
-    const sel = document.getElementById("rMusicTrack");
-    const tracks = window.Music.list();
-    if (sel.options.length !== tracks.length) {
-      sel.innerHTML = tracks.map((t) => `<option value="${esc(t.id)}">${esc(t.title)}</option>`).join("");
-    }
-    sel.value = s.id;
-    document.getElementById("rMusicVol").value = Math.round(s.volume * 100);
-  }
-  function openMusic() { renderMusicPanel(); $mPanel.classList.add("open"); $mBack.classList.add("open"); }
-  function closeMusic() { $mPanel.classList.remove("open"); $mBack.classList.remove("open"); }
-  document.addEventListener("click", (e) => { if (e.target.closest("[data-music]")) openMusic(); });
-  $mBack.onclick = closeMusic;
-  document.getElementById("musicClose").onclick = closeMusic;
-  document.getElementById("musicPlay").onclick = () => window.Music.toggle();
-  document.getElementById("musicVol").oninput = (e) => window.Music.setVolume(e.target.value / 100);
-  document.getElementById("musicList").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-track]");
-    if (b) window.Music.play(b.dataset.track);
-  });
-  window.Music.on(() => { syncMusicButtons(); syncReaderMusic(); if ($mPanel.classList.contains("open")) renderMusicPanel(); });
-
   // ---------- router ----------
   let routeSeq = 0;
   async function route() {
@@ -1027,7 +969,7 @@
     const stale = () => seq !== routeSeq;
     if (readerCleanup) { readerCleanup(); readerCleanup = null; }
     const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
-    if (parts[0] !== "read") { ttsAutoStart = false; window.TTS.stop(); window.Music.duck(false); }
+    if (parts[0] !== "read") { ttsAutoStart = false; window.TTS.stop(); }
     const page = parts[0] || "home";
     document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === page));
     // trang chủ: đầu trang lớn có ô tìm kiếm + thanh thể loại; các trang khác: đầu trang gọn
@@ -1103,14 +1045,8 @@
   Cloud.ready.then(() => { renderAccountLink(); if (Cloud.user) pullNow(true); });
 
   addEventListener("hashchange", route);
-  syncMusicButtons();
   loadCatalog()
-    .then(async (music) => {
-      window.Music.setUploaded(music.filter((m) => m && m.file).map((m) => ({
-        id: "up:" + m.file, title: m.title || prettify(m.file), desc: m.desc || "", url: cdnUrl(m.file),
-      })));
-      await hydrateFromCache();
-    })
+    .then(hydrateFromCache)
     .then(route)
     .catch((err) => {
       console.error(err);

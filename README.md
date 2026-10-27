@@ -3,12 +3,12 @@
 Web đọc truyện tu tiên, **không có backend**:
 
 - **Vercel**: chỉ chứa web tĩnh (thư mục `public/`). Gồm trang đọc `/` và trang quản trị `/admin`.
-- **Bunny Storage + Pull Zone**: chứa truyện (.epub), ảnh bìa, nhạc và file `catalog.json`.
-- **Người đọc**: tiến độ đọc, tủ sách, cài đặt và nhạc đang chọn lưu trong localStorage. Truyện đã tải lưu trong IndexedDB, mở lại không phải tải lại.
+- **Bunny Storage + Pull Zone**: chứa truyện (.epub), ảnh bìa và file `catalog.json`.
+- **Người đọc**: tiến độ đọc, tủ sách và cài đặt lưu trong localStorage. Truyện đã tải lưu trong IndexedDB, mở lại không phải tải lại.
 - **Admin**: trang `/admin` upload thẳng lên Bunny Storage từ trình duyệt.
 
 ```
-Người đọc ──▶ Vercel (/)       ──đọc──▶ Bunny CDN (catalog.json, .epub, ảnh, nhạc)
+Người đọc ──▶ Vercel (/)       ──đọc──▶ Bunny CDN (catalog.json, .epub, ảnh)
 Admin     ──▶ Vercel (/admin)  ──ghi──▶ Bunny Storage API ──▶ Storage Zone ──▶ Pull Zone
 ```
 
@@ -20,7 +20,6 @@ Admin     ──▶ Vercel (/admin)  ──ghi──▶ Bunny Storage API ──
   - File có khoá DRM thì không đọc được. Dùng bản không có DRM, hoặc mở bằng [Calibre](https://calibre-ebook.com), chuyển sang EPUB rồi đăng.
   - Sửa thông tin rồi bấm **Đăng truyện**.
   - Sửa, ẩn/hiện (lưu nháp), sắp xếp thứ tự, thay EPUB, đổi ảnh bìa, xoá truyện (xoá luôn file trên Bunny).
-- **Nhạc nền**: tải mp3/ogg/m4a lên, đổi tên, nghe thử, xoá.
 - **Cài đặt**: tên trang, thông báo ở đầu thư viện, mật khẩu quản trị, kiểm tra kết nối CDN.
 
 ### Mật khẩu
@@ -41,11 +40,10 @@ Mỗi lần thay EPUB hoặc ảnh bìa, nội dung mới được lưu ở thư
 ## Cấu trúc trên Bunny Storage
 
 ```
-/catalog.json                     danh sách truyện, nhạc, thông tin trang (chỉ khi KHÔNG dùng Supabase)
+/catalog.json                     danh sách truyện, thông tin trang (chỉ khi KHÔNG dùng Supabase)
 /novels/<id>/<phiên bản>/toc.json danh sách tên chương
 /novels/<id>/<phiên bản>/c<k>.json gói 50 chương (c0 = chương 1–50, c1 = 51–100…)
 /bia/*.jpg                        ảnh bìa (thu nhỏ còn 600px)
-/nhac/*.mp3                       nhạc nền tải lên
 /_admin/key.json                  mật khẩu quản trị đã mã hoá
 ```
 
@@ -65,7 +63,7 @@ Khi đăng truyện, trang quản trị đọc EPUB rồi chia thành các gói 
 - **Nghe truyện**:
   - Bấm 🎧 trong trình đọc để nghe bằng giọng đọc có sẵn trên máy.
   - Chỉnh được tốc độ và giọng đọc. Chạm vào đoạn nào thì đọc từ đoạn đó.
-  - Đọc hết chương thì tự sang chương sau, nhạc nền tự nhỏ lại khi đang đọc.
+  - Đọc hết chương thì tự sang chương sau.
   - Cần máy có giọng tiếng Việt. Android và Microsoft Edge thường có sẵn; trên Windows, thêm trong *Cài đặt → Thời gian & ngôn ngữ → Giọng nói*.
 - **Giọng AI · Người kể chuyện**: chọn trong ô giọng đọc của thanh nghe. Giọng được tạo ngay trên máy người đọc, không qua máy chủ.
   - Dùng model [VieNeu-TTS v3 Nano](https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Nano) (Apache-2.0) chạy bằng onnxruntime-web trong Web Worker. Giọng người kể chuyện là giọng clone, lưu sẵn ở `public/ai-voice/narrator.json`.
@@ -86,10 +84,10 @@ Khi đăng truyện, trang quản trị đọc EPUB rồi chia thành các gói 
 ## Supabase: tài khoản người đọc + đăng nhập quản trị an toàn (tuỳ chọn)
 
 Khi bật:
-- **Danh sách truyện, nhạc nền, tên trang, thông báo** nằm trong database (bảng `novels`, `music`, `site_settings`) thay cho `catalog.json`.
+- **Danh sách truyện, tên trang, thông báo** nằm trong database (bảng `novels`, `site_settings`) thay cho `catalog.json`.
   - Admin thêm, sửa, ẩn hay xoá truyện thì người đọc thấy **ngay**, không bị CDN giữ bản cũ.
   - Trang đọc lưu lại danh sách lần tải gần nhất, nên vẫn mở được khi mất mạng hoặc khi Supabase đang tạm dừng.
-- **Nội dung chương, ảnh bìa, file nhạc** vẫn nằm trên Bunny CDN. Mỗi lần đăng là một đường dẫn mới nên không bao giờ lẫn bản cũ.
+- **Nội dung chương, ảnh bìa** vẫn nằm trên Bunny CDN. Mỗi lần đăng là một đường dẫn mới nên không bao giờ lẫn bản cũ.
 - **Người đọc** đăng nhập để tiến độ đọc và tủ sách tự đồng bộ giữa các máy. Không đăng nhập vẫn đọc bình thường.
 - **Admin** đăng nhập bằng tài khoản. Việc ghi lên Bunny đi qua Edge Function `bunny`, nên mật khẩu Storage chỉ nằm trên server Supabase.
 
@@ -168,15 +166,6 @@ Dữ liệu giả lập lưu trong thư mục `mock-bunny\`. Trên màn hình đ
 
 Mật khẩu là `devkey`.
 
-## Nhạc nền
-
-- 4 bài dựng sẵn được tổng hợp trực tiếp bằng Web Audio theo thang ngũ cung, gồm tiếng cổ cầm, tiêu, chuông, mưa, gió và giọt nước. Không cần file và không lo bản quyền:
-  - *Thanh Sơn Tĩnh Tọa*
-  - *Vân Hải Phiêu Diêu*
-  - *Trúc Lâm Thính Vũ*
-  - *Linh Tuyền Cổ Động*
-- Bài tải lên qua /admin hiện thêm trong danh sách. Chỉ dùng nhạc bạn có quyền phát.
-
 ## Mã nguồn
 
 | File | Nội dung |
@@ -184,6 +173,5 @@ Mật khẩu là `devkey`.
 | `public/index.html`, `public/js/app.js` | Trang đọc: thư viện, tủ sách, trình đọc, sao lưu/khôi phục dữ liệu |
 | `public/admin/` | Trang quản trị |
 | `public/js/epub.js` | Đọc EPUB trên trình duyệt (dùng JSZip từ cdnjs), dùng chung cho cả hai trang |
-| `public/js/music.js` | Nhạc nền |
 | `public/config.js` | Cấu hình kết nối Bunny (không chứa mật khẩu) |
 | `serve.ps1` | Server tĩnh để chạy thử, kèm chế độ giả lập Bunny |

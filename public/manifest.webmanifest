@@ -1,7 +1,7 @@
 {
   "name": "Tu Tiên Các",
   "short_name": "Tu Tiên Các",
-  "description": "Đọc truyện tu tiên, có nhạc nền và đọc được khi không có mạng.",
+  "description": "Đọc truyện tu tiên, nghe giọng đọc AI và đọc được khi không có mạng.",
   "lang": "vi",
   "start_url": "/",
   "scope": "/",

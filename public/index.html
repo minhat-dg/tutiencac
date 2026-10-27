@@ -67,7 +67,6 @@
         <a href="#/shelf" data-nav="shelf">Tủ sách</a>
         <a href="#/account" data-nav="account" id="accountLink" hidden>Đăng nhập</a>
         <button class="btn small" id="installBtn" hidden title="Cài ứng dụng lên máy">Cài app</button>
-        <button class="ibtn music-btn" data-music title="Nhạc nền">♪</button>
       </nav>
     </div>
 
@@ -110,21 +109,11 @@
 
   <main id="app"><div class="loading">Đang tải thư viện…</div></main>
 
-  <div class="backdrop" id="musicBackdrop"></div>
-  <aside class="panel" id="musicPanel" aria-label="Nhạc nền">
-    <h3>Nhạc nền <button class="ibtn" id="musicClose">✕</button></h3>
-    <div class="setrow"><button class="btn" id="musicPlay">▶ Phát</button></div>
-    <div class="setrow"><label for="musicVol">Âm lượng</label><input type="range" id="musicVol" min="0" max="100"></div>
-    <div class="setrow"><label>Chọn bài</label><ul class="mlist" id="musicList"></ul></div>
-    <p class="hint">Các bài dựng sẵn được tạo trực tiếp trên trình duyệt từ ngũ cung cổ phong, mỗi lần nghe một khác.</p>
-  </aside>
-
   <div id="toast" class="toast"></div>
 
   <script src="config.js"></script>
   <script src="js/demo-data.js"></script>
   <script src="js/epub.js"></script>
-  <script src="js/music.js"></script>
   <script src="js/ai-voice/audio-store.js"></script>
   <script src="js/tts.js"></script>
   <script src="js/cloud.js"></script>

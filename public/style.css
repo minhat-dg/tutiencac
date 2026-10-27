@@ -30,7 +30,7 @@
   }
 }
 
-/* panels outside the reader (music) fall back to the site palette */
+/* panels outside the reader fall back to the site palette */
 :root { --r-bg: var(--surface); --r-text: var(--text); --r-muted: var(--muted); --r-border: var(--border); }
 
 * { box-sizing: border-box; }
@@ -108,9 +108,8 @@ body.reading .site-header, body.reading .catbar { display: none; }
   .topbar nav { width: 100%; justify-content: flex-start; gap: 16px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .topbar nav::-webkit-scrollbar { display: none; }
   .topbar nav a { white-space: nowrap; }
-  /* nút nhạc + cài app nằm cùng hàng với logo, menu cuộn ngang ở hàng dưới */
-  .topbar nav .music-btn { position: absolute; top: 14px; right: 14px; }
-  .topbar nav #installBtn { position: absolute; top: 16px; right: 62px; }
+  /* nút cài app nằm cùng hàng với logo, menu cuộn ngang ở hàng dưới */
+  .topbar nav #installBtn { position: absolute; top: 16px; right: 14px; }
   .hero { padding: 6px 14px 30px; }
   .hero .tagline { font-size: .95rem; }
   .catbar { padding: 0 10px; }
@@ -284,22 +283,6 @@ code { background: var(--border); padding: 1px 5px; border-radius: 4px; font-siz
 .cover.img::after { display: none; }
 .cover.img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-/* ---------- music ---------- */
-.music-btn.on { color: var(--accent); border-color: var(--accent); animation: pulse 2.4s ease-in-out infinite; }
-@keyframes pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent); } }
-#musicVol { width: 100%; accent-color: var(--accent); }
-.mlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.mtrack {
-  width: 100%; text-align: left; background: transparent; color: var(--r-text);
-  border: 1px solid var(--r-border); border-radius: 10px; padding: 10px 12px; display: grid; gap: 2px;
-}
-.mtrack.active { border-color: var(--accent); }
-.mtrack .mt { font-weight: 600; }
-.mtrack.active .mt { color: var(--accent); }
-.mtrack .md { font-size: .8rem; color: var(--r-muted); }
-#musicPanel, #musicBackdrop { z-index: 60; }
-#musicPanel { z-index: 61; }
-
 /* ---------- catalog tool ---------- */
 .tool { max-width: 960px; }
 .box { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 4px 18px 16px; margin-bottom: 18px; }
@@ -335,12 +318,11 @@ label.check { display: inline-flex !important; grid-auto-flow: column; align-ite
 .brand-text { font-family: "Noto Serif", serif; }
 @media (max-width: 600px) { .sticky-actions { position: static; } }
 
-/* music controls in the reader settings panel */
+/* ô chọn trong trang đọc (tốc độ, giọng đọc) */
 .rselect {
   flex: 1; min-width: 0; font: inherit; font-size: .9rem; color: var(--r-text); background: var(--r-bg);
   border: 1px solid var(--r-border); border-radius: 8px; padding: 6px 8px;
 }
-.rrange { width: 100%; accent-color: var(--accent); }
 
 /* ---------- nghe truyện ---------- */
 .rcontent .tts-on { background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 6px; box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent); }

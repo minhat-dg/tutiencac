@@ -47,7 +47,7 @@ language sql stable security definer set search_path = ''
 as $$ select exists (select 1 from public.admins where user_id = (select auth.uid())); $$;
 
 -- ------------------------------------------------------------------
--- Thư viện: danh sách truyện, nhạc nền, thông tin trang (thay cho catalog.json).
+-- Thư viện: danh sách truyện, thông tin trang (thay cho catalog.json).
 -- Ai cũng đọc được; truyện đang ẩn chỉ admin thấy; chỉ admin được sửa.
 -- Nội dung chương và ảnh bìa vẫn nằm trên Bunny, ở đây chỉ lưu đường dẫn.
 
@@ -70,12 +70,6 @@ create table if not exists public.novels (
   updated_at  timestamptz not null default now()
 );
 
-create table if not exists public.music (
-  file     text primary key,                 -- nhac/*.mp3 trên Bunny
-  title    text not null default '',
-  position double precision not null default 0
-);
-
 create table if not exists public.site_settings (
   id     int primary key default 1 check (id = 1),
   name   text,
@@ -83,7 +77,6 @@ create table if not exists public.site_settings (
 );
 
 alter table public.novels enable row level security;
-alter table public.music enable row level security;
 alter table public.site_settings enable row level security;
 
 drop policy if exists "novels: ai cũng xem" on public.novels;
@@ -93,12 +86,6 @@ drop policy if exists "novels: admin sửa" on public.novels;
 create policy "novels: admin sửa" on public.novels
   for all to authenticated using ((select public.is_admin())) with check ((select public.is_admin()));
 
-drop policy if exists "music: ai cũng xem" on public.music;
-create policy "music: ai cũng xem" on public.music for select to anon, authenticated using (true);
-drop policy if exists "music: admin sửa" on public.music;
-create policy "music: admin sửa" on public.music
-  for all to authenticated using ((select public.is_admin())) with check ((select public.is_admin()));
-
 drop policy if exists "site: ai cũng xem" on public.site_settings;
 create policy "site: ai cũng xem" on public.site_settings for select to anon, authenticated using (true);
 drop policy if exists "site: admin sửa" on public.site_settings;
@@ -106,8 +93,8 @@ create policy "site: admin sửa" on public.site_settings
   for all to authenticated using ((select public.is_admin())) with check ((select public.is_admin()));
 
 -- Quyền truy cập bảng qua API (quy tắc RLS ở trên vẫn quyết định từng dòng).
-grant select on public.novels, public.music, public.site_settings to anon, authenticated;
-grant insert, update, delete on public.novels, public.music, public.site_settings to authenticated;
+grant select on public.novels, public.site_settings to anon, authenticated;
+grant insert, update, delete on public.novels, public.site_settings to authenticated;
 grant select, insert, update, delete on public.reader_state to authenticated;
 grant select on public.admins to authenticated;
 

@@ -283,16 +283,16 @@
   $("logoutBtn").onclick = logout;
 
   // ---------- catalog ----------
-  let cat = { site: {}, novels: [], music: [] };
+  let cat = { site: {}, novels: [] };
   const fileId = (file) => slug(String(file).replace(/^.*\//, "").replace(/\.epub$/i, ""));
   const entryId = (n) => (n.id ? slug(n.id) : fileId(n.file || ""));
   const asDir = (d) => String(d).replace(/\/?$/, "/");
 
   function normalizeCat(c) {
     c = Array.isArray(c) ? { novels: c } : c || {};
-    return { site: c.site || {}, novels: (c.novels || []).filter((n) => n && (n.file || n.dir)), music: (c.music || []).filter((m) => m && m.file) };
+    return { site: c.site || {}, novels: (c.novels || []).filter((n) => n && (n.file || n.dir)) };
   }
-  // Có Supabase: danh sách truyện / nhạc / thông tin trang nằm trong database.
+  // Có Supabase: danh sách truyện / thông tin trang nằm trong database.
   // Chưa có: nằm trong catalog.json trên Bunny như trước.
   const useDb = () => Cloud.enabled && mode === "cloud";
   async function loadCat() {
@@ -338,7 +338,6 @@
   function render() {
     tab = (location.hash.slice(1) || "truyen");
     document.querySelectorAll("[data-tab]").forEach((a) => a.classList.toggle("active", a.dataset.tab === tab));
-    if (tab === "nhac") return viewMusic();
     if (tab === "caidat") return viewSettings();
     return viewNovels();
   }
@@ -703,75 +702,17 @@
     });
   }
 
-  // ---------- nhạc ----------
-  function viewMusic() {
-    $("view").innerHTML = `
-      <div class="head-row"><h2>Nhạc nền</h2><span class="stats">${cat.music.length} bài tải lên</span></div>
-      <p class="hint">Trang đọc luôn có sẵn 4 bài dựng sẵn (Thanh Sơn Tĩnh Tọa, Vân Hải Phiêu Diêu, Trúc Lâm Thính Vũ, Linh Tuyền Cổ Động). Bài tải lên ở đây sẽ hiện thêm trong danh sách. Chỉ dùng nhạc bạn có quyền phát.</p>
-      <label class="drop" id="mdrop">
-        <input type="file" id="audioInput" accept="audio/mpeg,audio/ogg,audio/mp4,audio/x-m4a,.mp3,.ogg,.m4a" multiple hidden>
-        <b>＋ Tải nhạc lên (mp3, ogg, m4a)</b><span class="hint">kéo thả hoặc bấm để chọn, chọn được nhiều file</span>
-      </label>
-      <div class="nlist">
-        ${cat.music.map((m, i) => `
-          <div class="mitem" data-i="${i}">
-            <input value="${esc(m.title || "")}" placeholder="Tên bài" data-title>
-            <button class="ibtn danger" data-del>Xoá</button>
-            <audio controls preload="none" src="${esc(cdnUrl(m.file))}"></audio>
-          </div>`).join("") || `<div class="empty">Chưa có bài nào được tải lên.</div>`}
-      </div>`;
-
-    const input = $("audioInput"), drop = $("mdrop");
-    input.onchange = () => { uploadMusic([...input.files]); input.value = ""; };
-    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
-    drop.ondragleave = () => drop.classList.remove("over");
-    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); uploadMusic([...e.dataTransfer.files]); };
-
-    const list = $("view").querySelector(".nlist");
-    list.addEventListener("change", (e) => {
-      if (!e.target.matches("[data-title]")) return;
-      const m = cat.music[+e.target.closest("[data-i]").dataset.i];
-      const title = e.target.value.trim();
-      busy("Đang lưu…", () => mutate((c) => { const x = c.music.find((y) => y.file === m.file); if (x) x.title = title; })).then(() => toast("Đã đổi tên"), () => {});
-    });
-    list.addEventListener("click", (e) => {
-      if (!e.target.closest("[data-del]")) return;
-      const m = cat.music[+e.target.closest("[data-i]").dataset.i];
-      if (!confirm(`Xoá bài "${m.title}"?`)) return;
-      busy("Đang xoá…", async () => {
-        await mutate((c) => { c.music = c.music.filter((y) => y.file !== m.file); });
-        await Bunny.del(m.file);
-      }).then(() => toast("Đã xoá bài nhạc"), () => {});
-    });
-  }
-
-  async function uploadMusic(files) {
-    files = files.filter((f) => /\.(mp3|ogg|m4a)$/i.test(f.name));
-    if (!files.length) return toast("Chỉ nhận file mp3, ogg, m4a");
-    const added = [];
-    await busy("Đang tải nhạc lên…", async (progress) => {
-      for (const [k, f] of files.entries()) {
-        const ext = f.name.split(".").pop().toLowerCase();
-        const title = f.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
-        const path = `nhac/${slug(title)}-${stamp()}.${ext}`;
-        await Bunny.put(path, f, (r) => progress(`Đang tải ${k + 1}/${files.length}: ${title} — ${Math.round(r * 100)}%`, r));
-        added.push({ title, file: path });
-      }
-      await mutate((c) => { c.music.push(...added); });
-    }).then(() => toast(`Đã thêm ${added.length} bài nhạc`), () => {});
-  }
-
   // Khi đã dùng database: chuyển dữ liệu từ catalog.json (nếu database còn trống) và dọn file cũ.
   async function showOldFiles(sealed) {
     const box = $("oldFiles");
     if (!box) return;
     const old = normalizeCat(await Bunny.getJSON("catalog.json").catch(() => null));
-    const hasOldCatalog = old.novels.length || old.music.length || Object.keys(old.site).length;
+    const hasOldCatalog = old.novels.length || Object.keys(old.site).length;
     const catalogExists = hasOldCatalog || (await Bunny.getJSON("catalog.json").catch(() => null)) !== null;
-    const canImport = hasOldCatalog && !cat.novels.length && !cat.music.length;
+    const canImport = hasOldCatalog && !cat.novels.length;
     const parts = [];
     if (canImport) {
-      parts.push(`<p class="hint">File <code>catalog.json</code> cũ có ${old.novels.length} truyện, ${old.music.length} bài nhạc chưa có trong database.
+      parts.push(`<p class="hint">File <code>catalog.json</code> cũ có ${old.novels.length} truyện chưa có trong database.
         <button class="btn small" type="button" id="importOld">Chuyển sang database</button></p>`);
     }
     const leftovers = [catalogExists && !canImport ? "catalog.json" : "", sealed ? "_admin/key.json" : ""].filter(Boolean);
@@ -781,7 +722,7 @@
     }
     box.innerHTML = parts.join("");
     const imp = $("importOld");
-    if (imp) imp.onclick = () => busy("Đang chuyển…", () => mutate((c) => { c.novels = old.novels; c.music = old.music; c.site = old.site; }))
+    if (imp) imp.onclick = () => busy("Đang chuyển…", () => mutate((c) => { c.novels = old.novels; c.site = old.site; }))
       .then(() => { toast("Đã chuyển sang database"); viewSettings(); }, () => {});
     const del = $("delOld");
     if (del) del.onclick = () => busy("Đang xoá…", async () => { for (const f of leftovers) await Bunny.del(f); })
@@ -830,7 +771,7 @@
           <dt>Storage Zone</dt><dd>${esc(conn.zone)}</dd>
           <dt>Máy chủ Storage</dt><dd>${esc(conn.host)}</dd>
           <dt>Pull Zone (CDN)</dt><dd>${conn.cdn ? esc(conn.cdn) : "<b>Chưa cấu hình</b> — trang đọc sẽ chạy chế độ demo"}</dd>
-          <dt>Danh sách truyện</dt><dd>${useDb() ? "Database Supabase (bảng novels, music, site_settings)" : "File catalog.json trên Bunny"}</dd>
+          <dt>Danh sách truyện</dt><dd>${useDb() ? "Database Supabase (bảng novels, site_settings)" : "File catalog.json trên Bunny"}</dd>
           <dt>Trang đọc</dt><dd id="cdnCheck">Đang kiểm tra…</dd>
         </dl>
         <p class="hint">Muốn đổi: sửa <code>config.js</code> rồi deploy lại, hoặc đổi tạm trên máy này ở mục “Kết nối Bunny” của màn hình đăng nhập.</p>

@@ -62,12 +62,6 @@
   .nact { grid-column: 1 / -1; justify-content: flex-start; }
 }
 
-/* music list */
-.mitem { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
-.mitem input { font: inherit; font-weight: 600; border: 1px solid transparent; background: transparent; color: var(--text); border-radius: 8px; padding: 4px 8px; width: 100%; }
-.mitem input:hover, .mitem input:focus { border-color: var(--border); background: var(--bg); }
-.mitem audio { grid-column: 1 / -1; width: 100%; height: 36px; }
-
 /* forms */
 .field { display: grid; gap: 4px; font-size: .85rem; color: var(--muted); }
 .form-grid { display: grid; gap: 12px; }
