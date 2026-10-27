@@ -1043,8 +1043,30 @@
   });
 
   // ---------- cài như ứng dụng (PWA) ----------
+  // Có bản mới (deploy): service worker mới kích hoạt nhưng trang vẫn chạy code cũ đã lưu
+  // → tải lại ngay. Đang đọc/nghe thì không ngắt ngang: hiện thông báo, rời trang đọc mới tự tải lại.
+  let updatePending = false;
+  const reading = () => location.hash.startsWith("#/read/") || window.TTS.state.playing;
+  function showUpdateBar() {
+    if (document.getElementById("updateBar")) return;
+    const bar = document.createElement("div");
+    bar.id = "updateBar";
+    bar.className = "update-bar";
+    bar.innerHTML = `<span>Đã có bản mới của trang</span><button class="btn small" type="button">Cập nhật</button><button class="ibtn" type="button" title="Để sau">✕</button>`;
+    bar.querySelector(".btn").onclick = () => location.reload();
+    bar.querySelector(".ibtn").onclick = () => bar.remove();
+    document.body.appendChild(bar);
+  }
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
     addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+    let controller = navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      const prev = controller;
+      controller = navigator.serviceWorker.controller;
+      if (!prev || updatePending) return;                            // lần cài đầu tiên: không phải bản mới
+      updatePending = true;
+      if (reading()) showUpdateBar(); else location.reload();
+    });
   }
   const $install = document.getElementById("installBtn");
   let installEvt = null;
@@ -1072,7 +1094,10 @@
   });
   Cloud.ready.then(() => { renderAccountLink(); if (Cloud.user) pullNow(true); });
 
-  addEventListener("hashchange", route);
+  addEventListener("hashchange", () => {
+    if (updatePending && !reading()) return location.reload();   // rời trang đọc: giờ mới cập nhật
+    route();
+  });
   loadCatalog()
     .then(hydrateFromCache)
     .then(route)
