@@ -19,7 +19,7 @@ const GAP_COMMA_S = 0.2, GAP_SENTENCE_S = 0.4, GAP_PARAGRAPH_S = 0.7;
 let ort, g2p, cfg, voice, sess, nullCtx, ready;
 let downloading = false;   // true nếu có model phải tải qua mạng (chưa có trong cache)
 const queue = [];
-let busy = false;
+let busy = false, current = null;   // current: đoạn đang sinh dở (đã rời hàng đợi)
 const post = (msg, transfer) => self.postMessage(msg, transfer || []);
 
 // Tải có lưu Cache Storage (lần sau mở ngay, đọc được khi mất mạng) + báo tiến độ tải
@@ -110,22 +110,37 @@ function trimAndFade(w, sr) {
 }
 
 // một câu (ids) → audio 24 kHz. Port của vieneu/v3nano.py OnnxV3NanoEngine.infer
-async function synth(ids) {
+// job.dropped được kiểm tra sau MỖI lần chạy model: đoạn bị bỏ (người nghe nhảy đoạn / đổi chương) thì
+// dừng ngay giữa câu và trả null, không phải chờ sinh nốt cả câu.
+// session.run() của ORT xong qua microtask, không nhường cho hàng đợi tin nhắn → phải tự nhường (yieldMsgs)
+// thì tin "keep" mới được xử lý giữa chừng.
+const chan = new MessageChannel(), waiters = [];
+chan.port1.onmessage = () => waiters.shift()();
+const yieldMsgs = () => new Promise((r) => { waiters.push(r); chan.port2.postMessage(0); });
+async function synth(ids, job) {
   const C = cfg.latent_channels, L = ids.length;
   const idsT = i64(ids, [1, L]), mask = bool(ids.map((x) => (x !== cfg.pad ? 1 : 0)), [1, L]);
   const nullMask = bool([1, 1], [1, 2]);
+  await yieldMsgs();
+  if (job.dropped) return null;
   const ctx = (await sess.text_encoder.run({ ids: idsT, style: voice.style })).ctx;
   const logS = (await sess.duration_predictor.run({ ctx, ctx_mask: mask, spk: voice.spk })).log_seconds.data[0];
   const T = Math.max(cfg.min_frames, Math.round(Math.min(Math.exp(logS), cfg.max_chunk_seconds) * cfg.fps));
   let x = randn(C * T);
   for (let i = 0; i < STEPS; i++) {
+    await yieldMsgs();
+    if (job.dropped) return null;
     const t = new ort.Tensor("float32", Float32Array.of(i / STEPS), [1]), xt = new ort.Tensor("float32", x, [1, C, T]);
     const vc = (await sess.vector_estimator.run({ x: xt, t, ctx, ctx_mask: mask, spk: voice.spk, style: voice.style })).v.data;
+    await yieldMsgs();
+    if (job.dropped) return null;
     const vu = (await sess.vector_estimator.run({ x: xt, t, ctx: nullCtx, ctx_mask: nullMask, spk: voice.nullSpk, style: voice.nullStyle })).v.data;
     const nx = new Float32Array(x.length), dt = 1 / STEPS;
     for (let k = 0; k < x.length; k++) nx[k] = x[k] + dt * (vu[k] + CFG * (vc[k] - vu[k]));
     x = nx;
   }
+  await yieldMsgs();
+  if (job.dropped) return null;
   const w = (await sess.codec_decoder.run({ x: new ort.Tensor("float32", x, [1, C, T]) })).wav.data;
   const wav = new Float32Array(w.length);
   for (let k = 0; k < w.length; k++) wav[k] = Math.max(-1, Math.min(1, w[k]));
@@ -137,11 +152,12 @@ async function pump() {
   busy = true;
   try {
     while (queue.length) {
-      const job = queue.shift();
+      const job = current = queue.shift();
       const chunks = g2p.paragraph(job.text);
       for (let i = 0; i < chunks.length; i++) {
         if (job.dropped) break;
-        const wav = await synth(chunks[i].ids);
+        const wav = await synth(chunks[i].ids, job);
+        if (!wav) break;                                                        // bị hủy giữa câu
         const gapS = i === chunks.length - 1 ? GAP_PARAGRAPH_S : /[.!?]$/.test(chunks[i].text) ? GAP_SENTENCE_S : GAP_COMMA_S;
         const out = new Float32Array(wav.length + Math.round(gapS * cfg.sample_rate));   // phần thêm = im lặng
         out.set(wav);
@@ -152,7 +168,7 @@ async function pump() {
   } catch (e) {
     post({ type: "error", msg: String((e && e.message) || e) });
   } finally {
-    busy = false;
+    busy = false; current = null;
   }
 }
 
@@ -169,6 +185,10 @@ self.onmessage = async ({ data }) => {
     } else if (data.cmd === "keep") {
       const keep = new Set(data.keys);
       for (let i = queue.length - 1; i >= 0; i--) if (!keep.has(queue[i].key)) { queue[i].dropped = true; queue.splice(i, 1); }
+      if (current && !keep.has(current.key)) current.dropped = true;   // dừng đoạn đang sinh dở ngay sau lần chạy model hiện tại
+      // xếp lại hàng đợi theo thứ tự cần (đoạn sắp đọc trước)
+      const order = new Map(data.keys.map((k, i) => [k, i]));
+      queue.sort((a, b) => order.get(a.key) - order.get(b.key));
     }
   } catch (e) {
     post({ type: "error", msg: String((e && e.message) || e) });

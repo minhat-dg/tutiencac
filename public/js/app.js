@@ -904,6 +904,12 @@
     window.TTS.attach(ttsBlocks, () => {
       if (hasNext) { ttsAutoStart = true; go(chIdx + 1); }
       else toast("Đã nghe hết chương cuối");
+    }, async () => {
+      // chữ các đoạn chương sau, đúng như trang đọc sẽ hiển thị (để giọng AI sinh trước, trùng mã đoạn)
+      if (!hasNext) return [];
+      const nc = await getChapter(n, chIdx + 1);
+      if (!nc) return [];
+      return [nc.title, ...dropTitleLines(nc.content.split(/\n+/).map((s) => s.trim()).filter(Boolean), nc.title)];
     });
     const firstVisible = () => Math.max(0, ttsBlocks.findIndex((b) => b.getBoundingClientRect().bottom > 80));
     const openTts = (from) => { $ttsBar.hidden = false; syncTts(); window.TTS.play(from); };

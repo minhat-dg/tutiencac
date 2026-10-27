@@ -1,14 +1,14 @@
 // Service worker: lưu khung ứng dụng để mở được khi không có mạng.
 // Nội dung chương do trang đọc tự lưu trong IndexedDB, nên ở đây không lưu gói chương hay EPUB.
 // Đổi VERSION khi thay danh sách CORE.
-const VERSION = "v9";
+const VERSION = "v10";
 const SHELL = `shell-${VERSION}`;
 // v1 lưu ảnh bìa/thư viện CDN dạng opaque (no-cors): trang bật COEP thì trình duyệt chặn các bản đó
 // → đổi tên để activate xoá sạch, từ nay chỉ lưu bản tải bằng CORS.
 const RUNTIME = "runtime-v2";
 const CORE = [
   "/", "/style.css", "/config.js", "/manifest.webmanifest",
-  "/js/app.js", "/js/music.js", "/js/tts.js", "/js/cloud.js", "/js/epub.js", "/js/mobi.js", "/js/demo-data.js",
+  "/js/app.js", "/js/music.js", "/js/ai-voice/audio-store.js", "/js/ai-voice/nano-worker.js", "/js/ai-voice/vi-frontend.js", "/js/tts.js", "/js/cloud.js", "/js/epub.js", "/js/mobi.js", "/js/demo-data.js",
   "/icons/icon-192.png", "/icons/favicon-32.png", "/icons/favicon-16.png", "/brand/wordmark.png",
 ];
 
