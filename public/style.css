@@ -264,6 +264,14 @@ body.reading #app { max-width: none; padding: 0; }
   transition: transform .25s; z-index: 100; max-width: calc(100vw - 32px);
 }
 .toast.show { transform: translateX(-50%) translateY(0); }
+/* báo có bản mới khi đang đọc/nghe (không tự tải lại để khỏi ngắt ngang) */
+.update-bar {
+  position: fixed; left: 16px; right: 16px; top: 64px; margin: 0 auto; width: fit-content; z-index: 90;   /* dưới thanh công cụ trang đọc */
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px;
+  padding: 8px 8px 8px 14px; box-shadow: var(--shadow); font-size: .9rem;
+}
+.update-bar span { flex: 1; min-width: 0; }
 
 /* ---------- shared bits ---------- */
 .link { color: var(--accent); }
