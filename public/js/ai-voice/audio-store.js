@@ -62,10 +62,13 @@ window.AiAudioStore = (() => {
       return out;
     }
     const bytes = new Uint8Array(rec.data);
-    let o = 0, ts = 0;
+    let o = 0, ts = 0, rate = rec.sr;
     const parts = [];
     const dec = new AudioDecoder({
-      output: (a) => { const f = new Float32Array(a.numberOfFrames); a.copyTo(f, { planeIndex: 0, format: "f32-planar" }); parts.push(f); a.close(); },
+      output: (a) => {
+        rate = a.sampleRate;
+        const f = new Float32Array(a.numberOfFrames); a.copyTo(f, { planeIndex: 0, format: "f32-planar" }); parts.push(f); a.close();
+      },
       error: () => {},
     });
     dec.configure({ codec: "opus", sampleRate: rec.sr, numberOfChannels: 1 });
@@ -75,8 +78,24 @@ window.AiAudioStore = (() => {
       o += 2 + n; ts += 20000;
     }
     await dec.flush(); dec.close();
+    const all = new Float32Array(parts.reduce((s, p) => s + p.length, 0));
     let w = 0;
-    for (const p of parts) { if (w >= out.length) break; out.set(p.subarray(0, out.length - w), w); w += p.length; }
+    for (const p of parts) { all.set(p, w); w += p.length; }
+    const pcm = resample(all, rate, rec.sr);
+    out.set(pcm.subarray(0, out.length));
+    return out;
+  }
+
+  // Bộ giải Opus của trình duyệt luôn trả 48 kHz dù cấu hình 24 kHz → phải đổi về đúng tần số đã lưu,
+  // nếu không audio phát chậm gấp đôi, trầm và méo, lại mất nửa sau.
+  function resample(x, from, to) {
+    if (from === to) return x;
+    const r = from / to, out = new Float32Array(Math.floor(x.length / r));
+    if (Number.isInteger(r)) {                       // 48 → 24 kHz: lấy trung bình từng cặp mẫu
+      for (let i = 0; i < out.length; i++) { let s = 0; for (let k = 0; k < r; k++) s += x[i * r + k]; out[i] = s / r; }
+    } else {
+      for (let i = 0; i < out.length; i++) { const p = i * r, j = Math.floor(p), f = p - j; out[i] = x[j] * (1 - f) + (x[j + 1] ?? x[j]) * f; }
+    }
     return out;
   }
 
