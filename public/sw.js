@@ -1,7 +1,7 @@
 // Service worker: lưu khung ứng dụng để mở được khi không có mạng.
 // Nội dung chương do trang đọc tự lưu trong IndexedDB, nên ở đây không lưu gói chương hay EPUB.
 // Đổi VERSION khi thay danh sách CORE.
-const VERSION = "v8";
+const VERSION = "v9";
 const SHELL = `shell-${VERSION}`;
 // v1 lưu ảnh bìa/thư viện CDN dạng opaque (no-cors): trang bật COEP thì trình duyệt chặn các bản đó
 // → đổi tên để activate xoá sạch, từ nay chỉ lưu bản tải bằng CORS.
@@ -18,7 +18,10 @@ self.addEventListener("install", (e) => {
 
 self.addEventListener("activate", (e) => {
   e.waitUntil((async () => {
-    for (const k of await caches.keys()) if (k !== SHELL && k !== RUNTIME) await caches.delete(k);
+    // chỉ dọn cache của chính service worker; cache khác (vd model giọng AI "ai-voice-models-…", ~280 MB) phải giữ nguyên
+    for (const k of await caches.keys()) {
+      if (/^(shell|runtime)-/.test(k) && k !== SHELL && k !== RUNTIME) await caches.delete(k);
+    }
     await self.clients.claim();
   })());
 });

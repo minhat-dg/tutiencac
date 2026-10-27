@@ -120,6 +120,8 @@ window.TTS = (() => {
 
     function start() {
       if (ready) return ready;
+      // xin lưu trữ bền vững để trình duyệt không tự xoá model (~280 MB) khi thiếu dung lượng
+      try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch {}
       worker = new Worker("/js/ai-voice/nano-worker.js", { type: "module" });
       ready = new Promise((resolve, reject) => {
         worker.onmessage = ({ data }) => {
