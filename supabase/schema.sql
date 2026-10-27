@@ -99,6 +99,109 @@ grant select, insert, update, delete on public.reader_state to authenticated;
 grant select on public.admins to authenticated;
 
 -- ------------------------------------------------------------------
+-- Thống kê truy cập (ẩn danh): mỗi trình duyệt có một mã ngẫu nhiên, không lưu IP hay tài khoản.
+-- Trình duyệt không đọc/ghi thẳng 2 bảng này (bật RLS, không có quy tắc nào);
+-- chỉ đi qua hàm track() (ai cũng gọi được) và admin_stats() (chỉ admin).
+
+create table if not exists public.page_views (
+  id      bigint generated always as identity primary key,
+  at      timestamptz not null default now(),
+  visitor text not null,
+  page    text not null,                     -- home, novel, read, shelf…
+  novel   text,
+  chapter int
+);
+create index if not exists page_views_at on public.page_views (at);
+create index if not exists page_views_visitor on public.page_views (visitor, at);
+
+-- Ai đang mở trang: mỗi trình duyệt một dòng, cập nhật khoảng mỗi phút.
+create table if not exists public.presence (
+  visitor   text primary key,
+  page      text not null,
+  novel     text,
+  chapter   int,
+  listening boolean not null default false,  -- đang nghe giọng đọc
+  seen      timestamptz not null default now()
+);
+create index if not exists presence_seen on public.presence (seen);
+
+alter table public.page_views enable row level security;
+alter table public.presence enable row level security;
+
+-- p_view = true: tính một lượt xem (mở trang); false: chỉ báo "vẫn đang ở đây".
+create or replace function public.track(p_visitor text, p_page text, p_novel text, p_chapter int, p_view boolean, p_listening boolean)
+returns void language plpgsql security definer set search_path = ''
+as $$
+begin
+  if p_visitor is null or p_visitor !~ '^[a-z0-9]{12,32}$' then return; end if;
+  p_page := left(coalesce(p_page, ''), 20);
+  p_novel := left(p_novel, 120);
+  if p_view and not exists (   -- bỏ lượt mở lại đúng trang đó trong 30 giây (tải lại, bấm qua lại)
+    select 1 from public.page_views v
+    where v.visitor = p_visitor and v.at > now() - interval '30 seconds'
+      and v.page = p_page and v.novel is not distinct from p_novel and v.chapter is not distinct from p_chapter
+  ) then
+    insert into public.page_views (visitor, page, novel, chapter) values (p_visitor, p_page, p_novel, p_chapter);
+  end if;
+  insert into public.presence (visitor, page, novel, chapter, listening, seen)
+  values (p_visitor, p_page, p_novel, p_chapter, coalesce(p_listening, false), now())
+  on conflict (visitor) do update
+    set page = excluded.page, novel = excluded.novel, chapter = excluded.chapter, listening = excluded.listening, seen = now();
+end;
+$$;
+
+-- Số liệu cho trang quản trị. Ngày tính theo giờ Việt Nam. Dọn luôn dữ liệu cũ.
+create or replace function public.admin_stats(p_days int default 14)
+returns jsonb language plpgsql security definer set search_path = ''
+as $$
+declare
+  tz constant text := 'Asia/Ho_Chi_Minh';
+  online_since constant timestamptz := now() - interval '150 seconds';
+  today date := (now() at time zone tz)::date;
+  result jsonb;
+begin
+  if not public.is_admin() then raise exception 'Chỉ admin xem được thống kê'; end if;
+  p_days := least(greatest(coalesce(p_days, 14), 1), 90);
+  delete from public.presence where seen < now() - interval '1 day';
+  delete from public.page_views where at < now() - interval '180 days';
+
+  select jsonb_build_object(
+    'online', (select count(*) from public.presence where seen > online_since),
+    'listening', (select count(*) from public.presence where seen > online_since and listening),
+    'reading', coalesce((
+      select jsonb_agg(r order by r.n desc, r.novel) from (
+        select novel, chapter, count(*) as n, count(*) filter (where listening) as listening
+        from public.presence where seen > online_since and page = 'read' and novel is not null
+        group by novel, chapter order by n desc limit 30
+      ) r), '[]'::jsonb),
+    'pages', coalesce((
+      select jsonb_object_agg(page, n) from (
+        select page, count(*) as n from public.presence where seen > online_since group by page
+      ) p), '{}'::jsonb),
+    'daily', (
+      select jsonb_agg(jsonb_build_object('day', d.day::date, 'views', coalesce(v.views, 0), 'visitors', coalesce(v.visitors, 0)) order by d.day)
+      from generate_series((today - (p_days - 1))::timestamp, today::timestamp, interval '1 day') as d(day)
+      left join (
+        select (at at time zone tz)::date as day, count(*) as views, count(distinct visitor) as visitors
+        from public.page_views where at >= (today - (p_days - 1))::timestamp at time zone tz
+        group by 1
+      ) v on v.day = d.day::date),
+    'top', coalesce((
+      select jsonb_agg(t order by t.views desc) from (
+        select novel, count(*) as views, count(distinct visitor) as visitors
+        from public.page_views
+        where novel is not null and at >= (today - 6)::timestamp at time zone tz
+        group by novel order by views desc limit 10
+      ) t), '[]'::jsonb)
+  ) into result;
+  return result;
+end;
+$$;
+
+grant execute on function public.track(text, text, text, int, boolean, boolean) to anon, authenticated;
+grant execute on function public.admin_stats(int) to authenticated;
+
+-- ------------------------------------------------------------------
 -- CẤP QUYỀN QUẢN TRỊ (chạy riêng, SAU KHI đã đăng ký tài khoản trên web):
 -- thay email rồi bôi đen 2 dòng dưới và bấm Run.
 --

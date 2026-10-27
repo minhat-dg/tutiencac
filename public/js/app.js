@@ -962,6 +962,33 @@
     };
   }
 
+  // ---------- thống kê truy cập (ẩn danh) ----------
+  // Báo cho Supabase: mở trang nào (một lượt xem) và ~mỗi phút "vẫn đang ở đây" để admin thấy ai đang đọc.
+  // Chỉ một mã ngẫu nhiên của trình duyệt, không gửi tài khoản. Chạy thử ở localhost thì không tính,
+  // trừ khi đặt localStorage "track-dev" = true.
+  const Stats = (() => {
+    const on = !DEMO && window.Cloud.enabled &&
+      (!/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || LS.get("track-dev", false));
+    let visitor = LS.get("visitor", null);
+    if (!/^[a-z0-9]{12,32}$/.test(visitor || "")) {
+      visitor = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => (b % 36).toString(36)).join("");
+      LS.set("visitor", visitor);
+    }
+    let where = { page: "home" };
+    const send = (view) => on && window.Cloud.track({ visitor, ...where, view, listening: window.TTS.state.playing });
+    // tab ẩn mà vẫn đang nghe giọng đọc thì vẫn tính là đang đọc
+    setInterval(() => { if (!document.hidden || window.TTS.state.playing) send(false); }, 60000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) send(false); });
+    return {
+      view(parts) {
+        const page = parts[0] || "home";
+        where = page === "read" ? { page, novel: parts[1], chapter: parseInt(parts[2], 10) || 0 }
+          : page === "novel" ? { page, novel: parts[1] } : { page };
+        send(true);
+      },
+    };
+  })();
+
   // ---------- router ----------
   let routeSeq = 0;
   async function route() {
@@ -971,6 +998,7 @@
     const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
     if (parts[0] !== "read") { ttsAutoStart = false; window.TTS.stop(); }
     const page = parts[0] || "home";
+    Stats.view(parts);
     document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === page));
     // trang chủ: đầu trang lớn có ô tìm kiếm + thanh thể loại; các trang khác: đầu trang gọn
     document.getElementById("siteHeader").classList.toggle("compact", page !== "home");

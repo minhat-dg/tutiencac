@@ -175,5 +175,27 @@ window.Cloud = (() => {
         body: JSON.stringify({ user_id: session.user.id, data: payload, updated_at: new Date().toISOString() }),
       }).catch(() => {});
     },
+
+    // ---------- thống kê truy cập ----------
+    // Trang đọc: gọi hàm track() bằng khoá công khai (không cần thư viện, không gửi phiên đăng nhập).
+    track(args) {
+      if (!enabled) return;
+      fetch(`${URL_}/rest/v1/rpc/track`, {
+        method: "POST",
+        keepalive: true,
+        headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          p_visitor: args.visitor, p_page: args.page, p_novel: args.novel ?? null, p_chapter: args.chapter ?? null,
+          p_view: !!args.view, p_listening: !!args.listening,
+        }),
+      }).catch(() => {});
+    },
+    // Trang quản trị
+    async adminStats(days = 14) {
+      need();
+      const { data, error } = await client.rpc("admin_stats", { p_days: days });
+      if (error) fail(error);
+      return data;
+    },
   };
 })();
