@@ -21,6 +21,10 @@ Admin     ──▶ Vercel (/admin)  ──ghi──▶ Bunny Storage API ──
   - Sửa thông tin rồi bấm **Đăng truyện**.
   - Sửa, ẩn/hiện (lưu nháp), sắp xếp thứ tự, thay EPUB, đổi ảnh bìa, xoá truyện (xoá luôn file trên Bunny).
 - **Cài đặt**: tên trang, thông báo ở đầu thư viện, mật khẩu quản trị, kiểm tra kết nối CDN.
+- **Thống kê** (cần Supabase): số người đang mở trang, đang đọc truyện nào chương nào, đang nghe giọng đọc; lượt xem và số người xem 14 ngày qua; truyện được xem nhiều trong 7 ngày. Tự làm mới mỗi 20 giây.
+  - Ẩn danh: mỗi trình duyệt có một mã ngẫu nhiên, không lưu IP hay tài khoản. Dữ liệu giữ 180 ngày.
+  - "Đang mở trang" là những trình duyệt báo nhịp trong 2,5 phút gần nhất (trang gửi nhịp mỗi phút).
+  - Chạy thử ở localhost thì không tính, trừ khi đặt `localStorage["track-dev"] = "true"`.
 
 ### Mật khẩu
 

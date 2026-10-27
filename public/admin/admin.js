@@ -333,11 +333,14 @@
 
   // ---------- views ----------
   let tab = "truyen";
+  let statsTimer = 0;   // tự làm mới tab Thống kê
   let query = "";
 
   function render() {
     tab = (location.hash.slice(1) || "truyen");
     document.querySelectorAll("[data-tab]").forEach((a) => a.classList.toggle("active", a.dataset.tab === tab));
+    clearInterval(statsTimer);
+    if (tab === "thongke") return viewStats();
     if (tab === "caidat") return viewSettings();
     return viewNovels();
   }
@@ -727,6 +730,81 @@
     const del = $("delOld");
     if (del) del.onclick = () => busy("Đang xoá…", async () => { for (const f of leftovers) await Bunny.del(f); })
       .then(() => { toast("Đã xoá file cũ"); viewSettings(); }, () => {});
+  }
+
+  // ---------- thống kê ----------
+  // Số người đang mở trang (báo nhịp trong 2,5 phút gần nhất) + lượt xem theo ngày. Tự làm mới mỗi 20 giây.
+
+  const STATS_DAYS = 14;
+  const PAGE_NAMES = { home: "Trang chủ", novel: "Trang truyện", read: "Đọc truyện", shelf: "Tủ sách", "the-loai": "Thể loại", moi: "Mới cập nhật", account: "Tài khoản" };
+  const novelTitle = (id) => cat.novels.find((n) => entryId(n) === id)?.title || id;
+  const num = (n) => Number(n || 0).toLocaleString("vi-VN");
+
+  function viewStats() {
+    if (!useDb()) {
+      $("view").innerHTML = `<div class="head-row"><h2>Thống kê</h2></div>
+        <p class="hint">Cần bật Supabase (điền supabaseUrl trong config.js, đăng nhập bằng tài khoản admin) để xem thống kê.</p>`;
+      return;
+    }
+    $("view").innerHTML = `<div class="head-row"><h2>Thống kê</h2><span class="stats" id="statsTime"></span></div><div id="statsBody"><div class="empty">Đang tải…</div></div>`;
+    const load = async () => {
+      if (document.hidden || tab !== "thongke") return;
+      try { drawStats(await Cloud.adminStats(STATS_DAYS)); }
+      catch (err) {
+        $("statsBody").innerHTML = `<p class="hint">Không tải được thống kê: ${esc(err.message)}.<br>
+          Nếu vừa cập nhật web, hãy chạy lại file <code>supabase/schema.sql</code> trong Supabase → SQL Editor để tạo bảng thống kê.</p>`;
+      }
+    };
+    load();
+    statsTimer = setInterval(load, 20000);
+  }
+
+  function drawStats(s) {
+    const daily = s.daily || [];
+    const today = daily[daily.length - 1] || { views: 0, visitors: 0 };
+    const max = Math.max(1, ...daily.map((d) => d.views));
+    const dm = (d) => d.slice(8, 10) + "/" + d.slice(5, 7);
+    const pages = s.pages || {};
+    const others = Object.entries(pages).filter(([p]) => p !== "read").sort((a, b) => b[1] - a[1]);
+    $("statsTime").textContent = "Cập nhật lúc " + new Date().toLocaleTimeString("vi-VN");
+    $("statsBody").innerHTML = `
+      <div class="kpis">
+        <div class="kpi"><span class="kpi-v">${num(s.online)}</span><span class="kpi-l">Đang mở trang</span></div>
+        <div class="kpi"><span class="kpi-v">${num(pages.read)}</span><span class="kpi-l">Đang đọc truyện</span></div>
+        <div class="kpi"><span class="kpi-v">${num(s.listening)}</span><span class="kpi-l">Đang nghe giọng đọc</span></div>
+        <div class="kpi"><span class="kpi-v">${num(today.visitors)}</span><span class="kpi-l">Người xem hôm nay</span></div>
+        <div class="kpi"><span class="kpi-v">${num(today.views)}</span><span class="kpi-l">Lượt xem hôm nay</span></div>
+      </div>
+
+      <section class="box">
+        <h3>Đang đọc</h3>
+        ${s.reading.length ? `<table class="stbl"><thead><tr><th>Truyện</th><th>Chương</th><th class="r">Người</th></tr></thead><tbody>
+          ${s.reading.map((r) => `<tr><td>${esc(novelTitle(r.novel))}</td><td>${r.chapter + 1}</td>
+            <td class="r">${num(r.n)}${r.listening ? ` <span class="muted">(${num(r.listening)} đang nghe)</span>` : ""}</td></tr>`).join("")}
+        </tbody></table>` : `<p class="hint">Chưa có ai đang đọc.</p>`}
+        ${others.length ? `<p class="hint">Ở trang khác: ${others.map(([p, n]) => `${esc(PAGE_NAMES[p] || p)} ${num(n)}`).join(" · ")}</p>` : ""}
+      </section>
+
+      <section class="box">
+        <h3>Lượt xem ${STATS_DAYS} ngày qua</h3>
+        <div class="vchart" role="img" aria-label="Lượt xem theo ngày">
+          ${daily.map((d) => `<div class="vcol" tabindex="0" data-tip="${dm(d.day)}: ${num(d.views)} lượt xem, ${num(d.visitors)} người">
+            <div class="vbar" style="height:${(d.views / max) * 100}%"></div><span class="vday">${dm(d.day)}</span></div>`).join("")}
+        </div>
+        <details class="vtable"><summary>Xem dạng bảng</summary>
+          <table class="stbl"><thead><tr><th>Ngày</th><th class="r">Lượt xem</th><th class="r">Người xem</th></tr></thead><tbody>
+            ${daily.slice().reverse().map((d) => `<tr><td>${dm(d.day)}</td><td class="r">${num(d.views)}</td><td class="r">${num(d.visitors)}</td></tr>`).join("")}
+          </tbody></table>
+        </details>
+      </section>
+
+      <section class="box">
+        <h3>Truyện được xem nhiều (7 ngày)</h3>
+        ${s.top.length ? `<table class="stbl"><thead><tr><th>Truyện</th><th class="r">Lượt xem</th><th class="r">Người xem</th></tr></thead><tbody>
+          ${s.top.map((t) => `<tr><td>${esc(novelTitle(t.novel))}</td><td class="r">${num(t.views)}</td><td class="r">${num(t.visitors)}</td></tr>`).join("")}
+        </tbody></table>` : `<p class="hint">Chưa có dữ liệu.</p>`}
+      </section>
+      <p class="hint">Ẩn danh: mỗi trình duyệt là một mã ngẫu nhiên, không lưu IP hay tài khoản. Dữ liệu giữ 180 ngày.</p>`;
   }
 
   // ---------- cài đặt ----------

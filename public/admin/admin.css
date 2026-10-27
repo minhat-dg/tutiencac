@@ -101,3 +101,29 @@
 .busy .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
 .spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--accent); animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- thống kê ---------- */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 18px; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: grid; gap: 2px; }
+.kpi-v { font-size: 1.7rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.kpi-l { font-size: .82rem; color: var(--muted); }
+.box h3 { margin: 14px 0 10px; font-size: 1rem; }
+.stbl { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.stbl th { text-align: left; font-weight: 500; color: var(--muted); font-size: .8rem; border-bottom: 1px solid var(--border); padding: 6px 4px; }
+.stbl td { padding: 7px 4px; border-bottom: 1px solid var(--border); }
+.stbl tr:last-child td { border-bottom: 0; }
+.stbl .r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stbl .muted { color: var(--muted); font-size: .8rem; }
+.vchart { display: flex; align-items: stretch; gap: 2px; height: 180px; margin-bottom: 22px; border-bottom: 1px solid var(--border); }
+.vcol { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; position: relative; min-width: 0; outline: none; cursor: default; }
+.vbar { background: var(--accent); border-radius: 4px 4px 0 0; min-height: 2px; margin: 0 15%; }
+.vday { position: absolute; top: calc(100% + 4px); left: 0; right: 0; text-align: center; font-size: .7rem; color: var(--muted); white-space: nowrap; }
+.vcol:hover .vbar, .vcol:focus-visible .vbar { filter: brightness(1.15); }
+.vcol:hover::after, .vcol:focus-visible::after {
+  content: attr(data-tip); position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); z-index: 2;
+  background: var(--text); color: var(--bg); font-size: .78rem; padding: 4px 8px; border-radius: 6px; white-space: nowrap; pointer-events: none;
+}
+.vcol:nth-child(-n+3):hover::after, .vcol:nth-child(-n+3):focus-visible::after { left: 0; transform: none; }
+.vcol:nth-last-child(-n+3):hover::after, .vcol:nth-last-child(-n+3):focus-visible::after { left: auto; right: 0; transform: none; }
+@media (max-width: 640px) { .vcol:nth-child(even) .vday { visibility: hidden; } }
+.vtable summary { cursor: pointer; color: var(--muted); font-size: .85rem; margin-bottom: 6px; }
