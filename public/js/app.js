@@ -716,6 +716,23 @@
   }
 
   // ---------- reader ----------
+  // Nhiều file để sẵn tên chương ở đầu nội dung, có khi tách nhiều dòng ("Chương 2" / "Tiên Nhân")
+  // trong khi tiêu đề là "Chương 2 Tiên Nhân". Bỏ các dòng đầu (tối đa 3) ghép lại đúng bằng tiêu đề,
+  // để không hiện và không đọc to tên chương hai lần. Áp dụng cả cho truyện đã đăng từ trước.
+  // giải mã cả ký tự HTML còn sót trong file gốc (vd "&#8211;", "&amp;#8211;") trước khi so
+  const titleKey = (s) => s.replace(/&amp;/g, "&").replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d))
+    .normalize("NFC").toLowerCase().replace(/[\s:：.,\-–—]+/g, " ").trim();
+  function dropTitleLines(paras, title) {
+    const want = titleKey(title || "");
+    if (!want) return paras;
+    for (let k = 1; k <= Math.min(3, paras.length); k++) {
+      const got = titleKey(paras.slice(0, k).join(" "));
+      if (got === want) return paras.slice(k);
+      if (!want.startsWith(got)) break;
+    }
+    return paras;
+  }
+
   let readerCleanup = null;
   let ttsAutoStart = false; // chương vừa mở sẽ tự đọc to (đang nghe dở chương trước)
 
@@ -763,7 +780,7 @@
     if (!ch) return notFound("Không tìm thấy chương này.");
 
     document.body.classList.add("reading");
-    const paras = ch.content.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+    const paras = dropTitleLines(ch.content.split(/\n+/).map((s) => s.trim()).filter(Boolean), ch.title);
     const base = `#/read/${encodeURIComponent(n.id)}/`;
     const hasPrev = chIdx > 0, hasNext = chIdx < titles.length - 1;
     document.title = `${ch.title} · ${n.title}`;
