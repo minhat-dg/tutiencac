@@ -897,6 +897,7 @@
       if (!nc) return [];
       return [nc.title, ...dropTitleLines(nc.content.split(/\n+/).map((s) => s.trim()).filter(Boolean), nc.title)];
     });
+    window.TTS.warm();
     const firstVisible = () => Math.max(0, ttsBlocks.findIndex((b) => b.getBoundingClientRect().bottom > 80));
     const openTts = (from) => { $ttsBar.hidden = false; syncTts(); window.TTS.play(from); };
     const ttsBtn = document.getElementById("ttsBtn");
