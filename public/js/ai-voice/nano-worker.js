@@ -2,7 +2,7 @@
 // Nhận từng đoạn văn, tự chia câu + chuyển âm vị (vi-frontend.js), sinh audio từng câu và gửi về ngay
 // để trang đọc phát được câu đầu trong khi các câu sau còn đang sinh.
 //
-// Tin nhắn vào:  {cmd:"init"} · {cmd:"para", key, text} · {cmd:"keep", keys:[...]} (bỏ các đoạn chưa sinh không còn cần)
+// Tin nhắn vào:  {cmd:"init", threads} · {cmd:"para", key, text} · {cmd:"keep", keys:[...]} (bỏ các đoạn chưa sinh không còn cần)
 // Tin nhắn ra :  {type:"progress", loaded, total} · {type:"ready"} · {type:"chunk", key, idx, total, wav(Float32 24 kHz)}
 //                {type:"done", key, total} · {type:"error", msg}
 import { ViG2P } from "./vi-frontend.js";
@@ -46,12 +46,13 @@ async function cachedBytes(url, onBytes) {
   return out;
 }
 
-async function init() {
+async function init(threads) {
   const m = await import(`${ORT_DIST}ort.webgpu.min.mjs`);
   ort = m;
   ort.env.wasm.wasmPaths = ORT_DIST;
-  // đa luồng chỉ có khi trang được cô lập cross-origin (header COOP/COEP); không có thì 1 luồng
-  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1)) : 1;
+  // đa luồng chỉ có khi trang được cô lập cross-origin (header COOP/COEP); không có thì 1 luồng.
+  // Số luồng do trang chọn (xem tts.js: nhiều worker × 2 luồng nhanh hơn một worker nhiều luồng).
+  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, Math.min(threads || 2, (navigator.hardwareConcurrency || 2) - 1)) : 1;
 
   const [nanoCfg, table, extra, vc] = await Promise.all([
     fetch(MODEL_BASE + "config.json").then((r) => r.json()),
@@ -175,7 +176,7 @@ async function pump() {
 self.onmessage = async ({ data }) => {
   try {
     if (data.cmd === "init") {
-      ready = ready || init();
+      ready = ready || init(data.threads);
       await ready;
       post({ type: "ready", sampleRate: cfg.sample_rate });
     } else if (data.cmd === "para") {
