@@ -135,27 +135,6 @@ window.TTS = (() => {
     const wake = (e) => { if (e.wait) { const f = e.wait; e.wait = null; f(); } };
     const drop = (key) => { const e = mem.get(key); if (!e) return; e.urls.forEach((u) => u && URL.revokeObjectURL(u)); mem.delete(key); wake(e); };
 
-    // Số luồng cho worker: thử 2 rồi 4 (mỗi lần mở trang một mức), sau đó giữ mức nhanh hơn.
-    // Đo bằng thời gian sinh / thời lượng audio của ~40 giây đầu mỗi phiên, lưu trong máy.
-    const TUNE_KEY = "ai-tune", TUNE_AUDIO_S = 40;
-    const tune = (() => { try { return JSON.parse(localStorage.getItem(TUNE_KEY)) || {}; } catch { return {}; } })();
-    let threads = 2, tuneMs = 0, tuneAudio = 0;
-    function pickThreads() {
-      const max = Math.max(1, (navigator.hardwareConcurrency || 2) - 1);
-      const options = [2, 4].filter((n) => n <= max);
-      if (!options.length) return 1;
-      const untried = options.find((n) => !tune[n]);
-      return untried || options.reduce((a, b) => (tune[a] <= tune[b] ? a : b));
-    }
-    function measure(ms, seconds) {
-      if (tuneAudio >= TUNE_AUDIO_S) return;
-      tuneMs += ms; tuneAudio += seconds;
-      if (tuneAudio < TUNE_AUDIO_S) return;
-      const rtf = tuneMs / 1000 / tuneAudio;
-      tune[threads] = tune[threads] ? +(tune[threads] * 0.5 + rtf * 0.5).toFixed(3) : +rtf.toFixed(3);
-      try { localStorage.setItem(TUNE_KEY, JSON.stringify(tune)); } catch {}
-    }
-
     function start() {
       if (ready) return ready;
       // xin lưu trữ bền vững để trình duyệt không tự xoá model (~280 MB) khi thiếu dung lượng
@@ -168,13 +147,12 @@ window.TTS = (() => {
             if (data.downloading) setStatus(`Đang tải giọng AI lần đầu (khoảng 280 MB, chỉ tải một lần): ${pct}%`);
             else if (audio.paused) setStatus("Đang khởi động giọng AI…");   // đang phát đoạn đã lưu thì không báo
           } else if (data.type === "starting") { if (audio.paused) setStatus("Đang khởi động giọng AI…"); }
-          else if (data.type === "ready") { sampleRate = data.sampleRate; threads = data.threads || threads; setStatus(""); resolve(); }
+          else if (data.type === "ready") { sampleRate = data.sampleRate; setStatus(""); resolve(); }
           else if (data.type === "chunk") {
             const e = mem.get(data.key);
             if (!e) return;                                       // đoạn đã bỏ (đổi chương / nhảy xa): bỏ qua
             e.urls[data.idx] = wavBlob(data.wav);
             e.dur += data.wav.length / sampleRate;
-            if (data.ms && !document.hidden) measure(data.ms, data.wav.length / sampleRate);   // tab ẩn thì máy chạy chậm, không tính
             if (store) store.putChunk(data.key, data.idx, data.wav, sampleRate).catch(() => {});
             wake(e);
           } else if (data.type === "done") {
@@ -191,8 +169,7 @@ window.TTS = (() => {
         };
         worker.onerror = (e) => { setStatus("Trình duyệt này chưa chạy được giọng AI."); reject(e); };
       });
-      threads = pickThreads();
-      worker.postMessage({ cmd: "init", threads });
+      worker.postMessage({ cmd: "init" });
       return ready;
     }
 
@@ -243,12 +220,7 @@ window.TTS = (() => {
         items = want();                                   // trong lúc chờ có thể người nghe đã nhảy đi chỗ khác
       }
       if (!worker) return;
-      // đoạn người nghe đang chờ (chưa có câu nào): worker cắt câu đầu ngắn lại để có tiếng sớm
-      const waiting = state.playing && blocks[state.index] ? keyOf(textOf(state.index)) : null;
-      for (const x of unsent(items)) {
-        mem.get(x.key).sent = true;
-        worker.postMessage({ cmd: "para", key: x.key, text: x.text, fast: x.key === waiting });
-      }
+      for (const x of unsent(items)) { mem.get(x.key).sent = true; worker.postMessage({ cmd: "para", key: x.key, text: x.text }); }
       // báo worker bỏ các việc cũ không còn cần (kể cả câu đang sinh dở) và xếp lại thứ tự
       worker.postMessage({ cmd: "keep", keys: items.map((x) => x.key) });
     }
@@ -289,9 +261,9 @@ window.TTS = (() => {
     }
 
     const debug = () => ({ mem: [...mem].map(([key, e]) => ({ key, total: e.total, have: e.urls.filter(Boolean).length, dur: +e.dur.toFixed(1), src: e.src, sent: !!e.sent })),
-      nextTexts: nextTexts ? nextTexts.length : null, keyOf, threads, tune });
+      nextTexts: nextTexts ? nextTexts.length : null, keyOf });
 
-    return { playBlock, stopAudio, reset, debug, start, setRate: (r) => { audio.playbackRate = r; } };
+    return { playBlock, stopAudio, reset, debug, setRate: (r) => { audio.playbackRate = r; } };
   })();
 
   // ---------- API ----------
@@ -320,19 +292,7 @@ window.TTS = (() => {
       blocks = [];
       onFinish = null;
     },
-    play(i = state.index) {
-      if (!supported || !blocks.length) return;
-      if (usingAi()) try { localStorage.setItem("ai-used", String(Date.now())); } catch {}
-      speakFrom(Math.max(0, Math.min(i, blocks.length - 1)));
-    },
-    // Mở chương: người hay nghe giọng AI (trong 7 ngày qua) thì nạp model luôn ở nền,
-    // để lúc bấm nghe không phải chờ khởi động (vài giây).
-    warm() {
-      if (!usingAi()) return;
-      let last = 0;
-      try { last = +localStorage.getItem("ai-used") || 0; } catch {}
-      if (Date.now() - last < 7 * 86400000) ai.start().catch(() => {});
-    },
+    play(i = state.index) { if (supported && blocks.length) speakFrom(Math.max(0, Math.min(i, blocks.length - 1))); },
     pause() {
       session++;
       if (webSpeech) synth.cancel();

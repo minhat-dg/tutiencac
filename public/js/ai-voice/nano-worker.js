@@ -2,9 +2,8 @@
 // Nhận từng đoạn văn, tự chia câu + chuyển âm vị (vi-frontend.js), sinh audio từng câu và gửi về ngay
 // để trang đọc phát được câu đầu trong khi các câu sau còn đang sinh.
 //
-// Tin nhắn vào:  {cmd:"init", threads} · {cmd:"para", key, text, fast} · {cmd:"keep", keys:[...]} (bỏ các đoạn chưa sinh không còn cần)
-//                fast: người nghe đang chờ đoạn này → cắt câu đầu ngắn lại cho có tiếng sớm
-// Tin nhắn ra :  {type:"progress", loaded, total} · {type:"ready", threads} · {type:"chunk", key, idx, total, wav(Float32 24 kHz), ms}
+// Tin nhắn vào:  {cmd:"init"} · {cmd:"para", key, text} · {cmd:"keep", keys:[...]} (bỏ các đoạn chưa sinh không còn cần)
+// Tin nhắn ra :  {type:"progress", loaded, total} · {type:"ready"} · {type:"chunk", key, idx, total, wav(Float32 24 kHz)}
 //                {type:"done", key, total} · {type:"error", msg}
 import { ViG2P } from "./vi-frontend.js";
 
@@ -13,10 +12,7 @@ const ORT_DIST = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/";
 const MODEL_BASE = "https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Nano/resolve/aba295eb96a6fa6003ebe417cc1f2802a7adc1dc/";
 const MODEL_FILES = ["text_encoder.onnx", "duration_predictor.onnx", "vector_estimator.onnx", "codec_decoder.onnx"];
 const CACHE = "ai-voice-models-v1";
-// 6 bước flow matching, CFG chỉ ở 4 bước đầu: 10 lần chạy vector_estimator mỗi câu thay vì 16
-// (bản gốc 8 bước, mỗi bước 2 lần vì CFG). Đo trên câu mẫu: giọng khác bản gốc ít hơn nhiều so với độ khác tự nhiên
-// giữa hai lần sinh cùng một câu (đổi hạt nhiễu), mà nhanh hơn ~1,6 lần.
-const STEPS = 6, CFG_STEPS = 4, CFG = 3.0;
+const STEPS = 8, CFG = 3.0;
 // khoảng nghỉ sau mỗi câu (giây): theo dấu câu cuối, và dài hơn khi hết đoạn văn
 const GAP_COMMA_S = 0.2, GAP_SENTENCE_S = 0.4, GAP_PARAGRAPH_S = 0.7;
 
@@ -50,14 +46,12 @@ async function cachedBytes(url, onBytes) {
   return out;
 }
 
-async function init(threads) {
+async function init() {
   const m = await import(`${ORT_DIST}ort.webgpu.min.mjs`);
   ort = m;
   ort.env.wasm.wasmPaths = ORT_DIST;
-  // đa luồng chỉ có khi trang được cô lập cross-origin (header COOP/COEP); không có thì 1 luồng.
-  // Số luồng do trang chọn (tự dò theo tốc độ đo được): CPU có nhân hiệu năng + nhân tiết kiệm điện
-  // thường chạy 2 luồng nhanh hơn 4, vì nhiều luồng phải chờ nhân yếu.
-  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, Math.min(threads || 2, (navigator.hardwareConcurrency || 2) - 1)) : 1;
+  // đa luồng chỉ có khi trang được cô lập cross-origin (header COOP/COEP); không có thì 1 luồng
+  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1)) : 1;
 
   const [nanoCfg, table, extra, vc] = await Promise.all([
     fetch(MODEL_BASE + "config.json").then((r) => r.json()),
@@ -138,15 +132,11 @@ async function synth(ids, job) {
     if (job.dropped) return null;
     const t = new ort.Tensor("float32", Float32Array.of(i / STEPS), [1]), xt = new ort.Tensor("float32", x, [1, C, T]);
     const vc = (await sess.vector_estimator.run({ x: xt, t, ctx, ctx_mask: mask, spk: voice.spk, style: voice.style })).v.data;
+    await yieldMsgs();
+    if (job.dropped) return null;
+    const vu = (await sess.vector_estimator.run({ x: xt, t, ctx: nullCtx, ctx_mask: nullMask, spk: voice.nullSpk, style: voice.nullStyle })).v.data;
     const nx = new Float32Array(x.length), dt = 1 / STEPS;
-    if (i < CFG_STEPS) {
-      await yieldMsgs();
-      if (job.dropped) return null;
-      const vu = (await sess.vector_estimator.run({ x: xt, t, ctx: nullCtx, ctx_mask: nullMask, spk: voice.nullSpk, style: voice.nullStyle })).v.data;
-      for (let k = 0; k < x.length; k++) nx[k] = x[k] + dt * (vu[k] + CFG * (vc[k] - vu[k]));
-    } else {
-      for (let k = 0; k < x.length; k++) nx[k] = x[k] + dt * vc[k];
-    }
+    for (let k = 0; k < x.length; k++) nx[k] = x[k] + dt * (vu[k] + CFG * (vc[k] - vu[k]));
     x = nx;
   }
   await yieldMsgs();
@@ -157,34 +147,21 @@ async function synth(ids, job) {
   return trimAndFade(wav, cfg.sample_rate);
 }
 
-// Câu đầu dài (tới 140 ký tự ≈ 9 giây) thì phải chờ sinh xong cả câu mới có tiếng: tách ở dấu phẩy
-// đầu tiên (sau 25 ký tự) thành một mẩu ngắn để phát sớm, phần còn lại sinh trong lúc mẩu đầu đang phát.
-const QUICK_MIN = 25, QUICK_MAX = 70;
-function quickStart(chunks) {
-  const c = chunks[0];
-  if (!c || c.text.length <= QUICK_MAX) return chunks;
-  const cut = c.text.indexOf(", ", QUICK_MIN);
-  if (cut < 0 || cut > QUICK_MAX || c.text.length - cut < QUICK_MIN) return chunks;
-  const part = (t) => { const phones = g2p.phonemize(t); return { text: t, phones, ids: g2p.ids(phones) }; };
-  return [part(c.text.slice(0, cut + 1)), part(c.text.slice(cut + 2)), ...chunks.slice(1)];
-}
-
 async function pump() {
   if (busy) return;
   busy = true;
   try {
     while (queue.length) {
       const job = current = queue.shift();
-      const chunks = job.fast ? quickStart(g2p.paragraph(job.text)) : g2p.paragraph(job.text);
+      const chunks = g2p.paragraph(job.text);
       for (let i = 0; i < chunks.length; i++) {
         if (job.dropped) break;
-        const t0 = performance.now();
         const wav = await synth(chunks[i].ids, job);
         if (!wav) break;                                                        // bị hủy giữa câu
         const gapS = i === chunks.length - 1 ? GAP_PARAGRAPH_S : /[.!?]$/.test(chunks[i].text) ? GAP_SENTENCE_S : GAP_COMMA_S;
         const out = new Float32Array(wav.length + Math.round(gapS * cfg.sample_rate));   // phần thêm = im lặng
         out.set(wav);
-        post({ type: "chunk", key: job.key, idx: i, total: chunks.length, wav: out, ms: performance.now() - t0 }, [out.buffer]);
+        post({ type: "chunk", key: job.key, idx: i, total: chunks.length, wav: out }, [out.buffer]);
       }
       if (!job.dropped) post({ type: "done", key: job.key, total: chunks.length });
     }
@@ -198,12 +175,12 @@ async function pump() {
 self.onmessage = async ({ data }) => {
   try {
     if (data.cmd === "init") {
-      ready = ready || init(data.threads);
+      ready = ready || init();
       await ready;
-      post({ type: "ready", sampleRate: cfg.sample_rate, threads: ort.env.wasm.numThreads });
+      post({ type: "ready", sampleRate: cfg.sample_rate });
     } else if (data.cmd === "para") {
       await ready;
-      if (!queue.some((j) => j.key === data.key)) queue.push({ key: data.key, text: data.text, fast: !!data.fast });
+      if (!queue.some((j) => j.key === data.key)) queue.push({ key: data.key, text: data.text });
       pump();
     } else if (data.cmd === "keep") {
       const keep = new Set(data.keys);
